@@ -85,6 +85,8 @@ This is a list of all the features that are planned for Mixtapes:
   > Currently, it only has an option to sign out.
 - 🔜 **Download Support**: Download tracks for offline playback, even as local files.
 - 🔜 **Radio / Mixes**: Start a radio station from a song or artist.
+- 🔜 **Windows/macOS**: Builds for macOS and Windows
+  > Requires quite a bit of tinkering, not my highest priority 
 - 🔜 **Dedicated Data Directory**: Move all the data like cookies, cache, etc. to a dedicated directory instead of the project root directory.
 - 🔜 **Background Playback**: Play music in the background, even when the main window is closed.
 - ☑️ **Flatpak**: Package Mixtapes as a Flatpak.
