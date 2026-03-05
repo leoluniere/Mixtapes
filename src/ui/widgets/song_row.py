@@ -15,6 +15,8 @@ class SongRowWidget(Gtk.Box):
         self.model_item = None
         self._notify_handler_id = None
         self._player_handler_id = None
+        self._start_x = 0
+        self._start_y = 0
 
         self.row = Adw.ActionRow()
         self.row.set_hexpand(True)
@@ -83,8 +85,15 @@ class SongRowWidget(Gtk.Box):
         # Gesture for Right Click (Context Menu)
         gesture = Gtk.GestureClick()
         gesture.set_button(3)  # Right click
-        gesture.connect("pressed", self.on_right_click)
+        gesture.connect("released", self.on_right_click)
         self.row.add_controller(gesture)
+
+        # Gesture for Left Click (Activation)
+        left_click = Gtk.GestureClick()
+        left_click.set_button(1)
+        left_click.connect("pressed", self._on_left_pressed)
+        left_click.connect("released", self._on_left_released)
+        self.row.add_controller(left_click)
 
     def bind(self, item, page):
         print(f"[SONG-ROW-BIND] binding vid={item.video_id} title={item.title}")
@@ -215,6 +224,25 @@ class SongRowWidget(Gtk.Box):
             self.bar1.remove_css_class("bar-up")
             self.bar3.remove_css_class("bar-up")
         return GLib.SOURCE_CONTINUE
+
+    def _on_left_pressed(self, gesture, n_press, x, y):
+        self._start_x = x
+        self._start_y = y
+
+    def _on_left_released(self, gesture, n_press, x, y):
+        # Displacement check
+        dx = abs(x - self._start_x)
+        dy = abs(y - self._start_y)
+        if dx > 10 or dy > 10:
+            return
+
+        if self.model_item and self.page:
+            # Trigger page activation logic
+            if hasattr(self.page, "on_song_activated"):
+                # We need the position in the model.
+                # In Gtk.ListView, the widget doesn't know its' own position easily
+                # but we stored it in model_item.index when creating SongItem
+                self.page.on_song_activated(None, self.model_item.index)
 
     def on_right_click(self, gesture, n_press, x, y):
         if not self.model_item:

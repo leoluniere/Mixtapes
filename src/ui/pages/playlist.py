@@ -236,8 +236,6 @@ class PlaylistPage(Adw.Bin):
 
         self.songs_list = Gtk.ListView.new(self.selection_model, factory)
         self.songs_list.add_css_class("playlist-view")
-        self.songs_list.set_single_click_activate(True)
-        self.songs_list.connect("activate", self.on_song_activated)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -337,8 +335,15 @@ class PlaylistPage(Adw.Bin):
 
         gesture = Gtk.GestureClick()
         gesture.set_button(3)
-        gesture.connect("pressed", self._on_row_right_click_gesture)
+        gesture.connect("released", self._on_row_right_click_gesture)
         row.add_controller(gesture)
+
+        # Left Click Gesture instead of list_view activate
+        left_click = Gtk.GestureClick()
+        left_click.set_button(1)
+        left_click.connect("pressed", self._on_row_left_pressed, bin_widget)
+        left_click.connect("released", self._on_row_left_click, list_item)
+        bin_widget.add_controller(left_click)
 
         row._lv_video_data = None
         row._lv_full_track = None
@@ -481,6 +486,22 @@ class PlaylistPage(Adw.Bin):
 
     def _teardown_list_item(self, factory, list_item):
         list_item.set_child(None)
+
+    def _on_row_left_pressed(self, gesture, n_press, x, y, bin_widget):
+        bin_widget._start_x = x
+        bin_widget._start_y = y
+
+    def _on_row_left_click(self, gesture, n_press, x, y, list_item):
+        bin_widget = list_item.get_child()
+        if hasattr(bin_widget, "_start_x"):
+            dx = abs(x - bin_widget._start_x)
+            dy = abs(y - bin_widget._start_y)
+            if dx > 10 or dy > 10:
+                return
+
+        # Trigger the same logic as if the listview emitted 'activate'
+        position = list_item.get_position()
+        self.on_song_activated(self.songs_list, position)
 
     # ── Filter ────────────────────────────────────────────────────────────────
 
@@ -1499,6 +1520,7 @@ class PlaylistPage(Adw.Bin):
                     file = dialog_inner.open_finish(result)
                     if file:
                         path = file.get_path()
+                        print(f"[IMAGE-LOAD] Local cover file selected path={path}")
                         # Load pixbuf
                         pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
 

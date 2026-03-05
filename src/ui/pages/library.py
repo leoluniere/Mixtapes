@@ -253,7 +253,7 @@ class LibraryPage(Adw.Bin):
                 # Context Menu
                 gesture = Gtk.GestureClick()
                 gesture.set_button(3)
-                gesture.connect("pressed", self.on_row_right_click, row)
+                gesture.connect("released", self.on_row_right_click, row)
                 row.add_controller(gesture)
 
                 self.playlists_list.insert(row, i)

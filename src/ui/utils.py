@@ -32,6 +32,18 @@ def cache_pixbuf(url, pixbuf):
         IMG_CACHE.popitem(last=False)
 
 
+def get_high_res_url(url):
+    """Rewrites Google Image URLs to request an 800x800 resolution."""
+    if not url:
+        return url
+    if "googleusercontent.com" in url or "ggpht.com" in url:
+        # replace w120-h120 with w800-h800
+        url = re.sub(r"=w\d+-h\d+", "=w800-h800", url)
+        # replace s120 with s800 (but avoid replacing video sizes if any)
+        url = re.sub(r"=s\d+(?!x)", "=s800", url)
+    return url
+
+
 def get_yt_music_link(item_id, is_album=False):
     """
     Constructs a YouTube Music link for a playlist or album.
@@ -151,11 +163,13 @@ class AsyncImage(Gtk.Image):
     # ... (load_url, _fetch_image same) ...
 
     def load_url(self, url, **kwargs):
+        url = get_high_res_url(url)
         self.url = url
         if not url:
             self.set_from_icon_name("image-missing-symbolic")
             return
 
+        print(f"[IMAGE-LOAD] AsyncImage url={url}")
         cached_pixbuf = IMG_CACHE.get(url)
         if cached_pixbuf:
             IMG_CACHE.move_to_end(url)
@@ -184,8 +198,10 @@ class AsyncImage(Gtk.Image):
                 cache_pixbuf(url, pixbuf)
 
                 # Now perform the widget-specific scaling and cropping in the background thread
-                tw = self.target_w
-                th = self.target_h
+                # To support HiDPI (e.g. 200% scale), we double the target pixel density
+                # GTK will scale the texture back down smoothly, keeping it crisp.
+                tw = self.target_w * 2
+                th = self.target_h * 2
 
                 w = pixbuf.get_width()
                 h = pixbuf.get_height()
@@ -241,9 +257,11 @@ class AsyncImage(Gtk.Image):
         try:
             # We must load into a pixbuf first to handle scaling correctly
             path = file.get_path()
+            # Multiplying by 2 to support HiDPI displays
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                path, self.target_w, self.target_h, True
+                path, self.target_w * 2, self.target_h * 2, True
             )
+            print(f"[IMAGE-LOAD] AsyncImage path={path}")
             self.set_from_pixbuf(pixbuf)
             # Nullify URL so subsequent async loads don't overwrite this immediately
             self.url = f"file://{path}"
@@ -267,11 +285,13 @@ class AsyncPicture(Gtk.Picture):
             self.load_url(url)
 
     def load_url(self, url, **kwargs):
+        url = get_high_res_url(url)
         self.url = url
         if not url:
             self.set_paintable(None)
             return
 
+        print(f"[IMAGE-LOAD] AsyncPicture url={url}")
         cached_pixbuf = IMG_CACHE.get(url)
         if cached_pixbuf:
             IMG_CACHE.move_to_end(url)

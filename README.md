@@ -56,6 +56,7 @@ This is a list of all the features that are planned for Mixtapes:
   - ✅️ Playlist Play button
   - ✅️ Playlist Shuffle button
   - ✅️ Playlist Order
+  - ☑️ Playlist Reorder
   - ✅️ Playlist Cover Change
   - ✅️ Playlist Change Visibility
   - ✅️ Playlist Change Description

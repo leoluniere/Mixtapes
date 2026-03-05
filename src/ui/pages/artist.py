@@ -650,13 +650,15 @@ class ArtistPage(Adw.Bin):
 
             # Left Click Activation
             click_gesture = Gtk.GestureClick()
-            click_gesture.connect("pressed", self._on_grid_item_clicked, item_box)
+            click_gesture.set_button(1)
+            click_gesture.connect("pressed", self._on_grid_item_pressed, item_box)
+            click_gesture.connect("released", self._on_grid_item_clicked, item_box)
             item_box.add_controller(click_gesture)
 
             # Right Click Menu
             gesture = Gtk.GestureClick()
             gesture.set_button(3)
-            gesture.connect("pressed", self.on_grid_right_click, item_box)
+            gesture.connect("released", self.on_grid_right_click, item_box)
             item_box.add_controller(gesture)
 
         # Load More Cell
@@ -691,10 +693,11 @@ class ArtistPage(Adw.Bin):
 
             # Click handler for Load More
             more_click = Gtk.GestureClick()
+            more_click.connect("pressed", self._on_grid_item_pressed, load_more_cell)
             more_click.connect(
-                "pressed",
-                lambda gesture, n_press, x, y: self.on_load_more_clicked(
-                    None, title, section_dict, None, None
+                "released",
+                lambda gesture, n_press, x, y: self.on_load_more_clicked_with_check(
+                    gesture, x, y, load_more_cell, title, section_dict
                 ),
             )
             load_more_cell.add_controller(more_click)
@@ -1014,8 +1017,25 @@ class ArtistPage(Adw.Bin):
         else:
             print("No videoId in song data", data)
 
+    def _on_grid_item_pressed(self, gesture, n_press, x, y, item_box):
+        item_box._start_x = x
+        item_box._start_y = y
+
     def _on_grid_item_clicked(self, gesture, n_press, x, y, item_box):
+        if hasattr(item_box, "_start_x"):
+            dx = abs(x - item_box._start_x)
+            dy = abs(y - item_box._start_y)
+            if dx > 10 or dy > 10:
+                return
         self.on_grid_child_activated(None, item_box)
+
+    def on_load_more_clicked_with_check(self, gesture, x, y, cell, title, section_dict):
+        if hasattr(cell, "_start_x"):
+            dx = abs(x - cell._start_x)
+            dy = abs(y - cell._start_y)
+            if dx > 10 or dy > 10:
+                return
+        self.on_load_more_clicked(None, title, section_dict, None, None)
 
     def on_grid_child_activated(self, flowbox, child):
         # Handle both FlowBox child and direct Box items

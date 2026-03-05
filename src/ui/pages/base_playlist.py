@@ -201,7 +201,6 @@ class BasePlaylistPage(Adw.Bin):
 
         self.songs_view = Gtk.ListView(model=self.selection_model, factory=factory)
         self.songs_view.add_css_class("boxed-list")
-        self.songs_view.connect("activate", self.on_song_activated)
         self.songs_view.set_visible(False)
         track_section.append(self.songs_view)
 

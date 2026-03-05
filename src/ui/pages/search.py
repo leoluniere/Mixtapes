@@ -284,7 +284,7 @@ class SearchPage(Adw.Bin):
             # Context Menu (Right Click)
             gesture = Gtk.GestureClick()
             gesture.set_button(3)  # Right click
-            gesture.connect("pressed", self.on_row_right_click, row)
+            gesture.connect("released", self.on_row_right_click, row)
             row.add_controller(gesture)
 
             list_box.append(row)
