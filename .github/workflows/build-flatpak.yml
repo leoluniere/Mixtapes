@@ -29,7 +29,6 @@ jobs:
 
       - name: Build using Flatpak Builder
         run: |
-          sudo flatpak install -y flathub org.freedesktop.Sdk.Extension.node24//24.08
           sudo xvfb-run --auto-servernum flatpak-builder \
             --repo=repo \
             --disable-rofiles-fuse \
