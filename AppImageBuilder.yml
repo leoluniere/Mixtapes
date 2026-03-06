@@ -8,8 +8,7 @@ AppDir:
     name: Mixtapes
     icon: com.pocoguy.Muse
     version: latest
-    exec: usr/bin/python3
-    exec_args: "usr/share/muse/src/main.py $@"
+    exec: usr/bin/muse
 
   apt:
     arch: [amd64]
@@ -30,6 +29,7 @@ AppDir:
       - libgstreamer1.0-0
       - gstreamer1.0-gl
       - nodejs
+      - libgirepository-1.0-1
       - python3-requests
       - python3-urllib3
     exclude:
@@ -39,7 +39,7 @@ AppDir:
     env:
       PATH: "${APPDIR}/usr/bin:${PATH}"
       PYTHONHOME: "${APPDIR}/usr"
-      PYTHONPATH: "${APPDIR}/usr/share/muse:${APPDIR}/usr/lib/python3.12/site-packages:${APPDIR}/usr/local/lib/python3.12/dist-packages:${APPDIR}/usr/lib/python3/dist-packages"
+      PYTHONPATH: "${APPDIR}/usr/share/muse:${APPDIR}/usr/lib/python3.12/site-packages:${APPDIR}/usr/lib/python3/dist-packages"
 
 AppImage:
   arch: x86_64

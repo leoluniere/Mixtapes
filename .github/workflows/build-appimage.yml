@@ -43,14 +43,15 @@ jobs:
           mkdir -p AppDir/usr/lib/python3.12/site-packages
           # PyGObject is bundled via apt to ensure architecture compatibility
           grep -v "PyGObject" requirements.txt > requirements-pure.txt
-          sudo pip3 install -r requirements-pure.txt --target=AppDir/usr/lib/python3.12/site-packages --no-cache-dir --break-system-packages
-          sudo pip3 install "yt-dlp[default]" --target=AppDir/usr/lib/python3.12/site-packages --no-cache-dir --break-system-packages
+          pip3 install -r requirements-pure.txt --target=AppDir/usr/lib/python3.12/site-packages --no-cache-dir --break-system-packages
+          pip3 install "yt-dlp[default]" --target=AppDir/usr/lib/python3.12/site-packages --no-cache-dir --break-system-packages
 
           # Create launcher
           cat > AppDir/usr/bin/muse << 'EOF'
           #!/bin/bash
           # Include all possible bundled python paths
-          export PYTHONPATH="$APPDIR/usr/share/muse:$APPDIR/usr/lib/python3.12/site-packages:$APPDIR/usr/local/lib/python3.12/dist-packages:$APPDIR/usr/lib/python3/dist-packages:$PYTHONPATH"
+          export PYTHONPATH="$APPDIR/usr/share/muse:$APPDIR/usr/lib/python3.12/site-packages:$APPDIR/usr/lib/python3/dist-packages"
+          export PYTHONHOME="$APPDIR/usr"
           cd "$APPDIR/usr/share/muse"
           exec python3 src/main.py "$@"
           EOF
