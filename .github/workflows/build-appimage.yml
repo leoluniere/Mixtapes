@@ -12,6 +12,7 @@ jobs:
     name: Build AppImage
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
 
@@ -27,11 +28,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-dev-bin libcairo2-dev python3-dev libfuse2 libgirepository1.0-dev libxml2-utils wget file binutils patch qemu-user-static
-          if [ "${{ matrix.arch }}" = "aarch64" ]; then
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends crossbuild-essential-arm64
-          fi
 
       - name: Install appimage-builder
         run: |
