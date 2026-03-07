@@ -87,6 +87,18 @@ jobs:
           # Update repo and generate summary signed with the GPG key
           flatpak build-update-repo --generate-static-deltas --gpg-sign=${{ secrets.GPG_KEY_ID }} repo
 
+          # Generate the .flatpakrepo file
+          cat << EOF > repo/mixtapes.flatpakrepo
+          [Flatpak Repo]
+          Title=Mixtapes
+          Url=https://${{ github.repository_owner }}.github.io/Muse/
+          Homepage=https://github.com/${{ github.repository }}
+          Comment=A modern, Linux-first YouTube Music player
+          Description=A modern, Linux-first YouTube Music player
+          Icon=https://raw.githubusercontent.com/${{ github.repository }}/main/assets/icons/com.pocoguy.Muse.svg
+          GPGKey=$(gpg --export ${{ secrets.GPG_KEY_ID }} | base64 | tr -d '\n')
+          EOF
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

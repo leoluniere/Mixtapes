@@ -190,7 +190,7 @@ Automated builds for Flatpak are available for every change made to the reposito
 You can quickly add the automated repository to receive updates by running:
 
 ```bash
-flatpak remote-add --user --if-not-exists mixtapes https://m-obeid.github.io/Muse/
+flatpak remote-add --user --if-not-exists mixtapes https://m-obeid.github.io/Muse/mixtapes.flatpakrepo
 flatpak install --user mixtapes com.pocoguy.Muse
 ```
 
