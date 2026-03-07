@@ -17,7 +17,9 @@
    where we use our custom .song-row inside */
 listview.playlist-view > row,
 listview.playlist-view > row:hover,
-listview.playlist-view > row:selected {
+listview.playlist-view > row:selected,
+listview.playlist-view > row:focus,
+listview.playlist-view > row:focus:selected {
   background-color: transparent;
   background: none;
   border: none;
@@ -85,11 +87,6 @@ box.song-row {
 /* Only apply custom hover in the main playlist/search list views */
 listview.playlist-view box.song-row:hover {
   background-color: @row_hover;
-}
-
-/* Highlight for selected/active items (Transferred from ListBoxRow) */
-listview.playlist-view > row:selected box.song-row {
-  background-color: @row_selected;
 }
 
 /* Playing indicator */
@@ -179,4 +176,3 @@ listview.playlist-view > row:disabled {
 .compact .header-info-box {
   margin-bottom: 24px;
 }
-

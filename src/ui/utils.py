@@ -17,14 +17,14 @@ def cache_pixbuf(url, pixbuf):
         return
 
     # Scale down very large images before caching to save massive amounts of RAM
-    # 800px is more than enough for any UI element in this app
+    # 1600px is more than enough for any UI element (including expanded player)
     w = pixbuf.get_width()
     h = pixbuf.get_height()
-    max_dim = 800
+    max_dim = 1600
     if w > max_dim or h > max_dim:
         scale = max_dim / max(w, h)
         pixbuf = pixbuf.scale_simple(
-            int(w * scale), int(h * scale), GdkPixbuf.InterpType.HYPER
+            int(w * scale), int(h * scale), GdkPixbuf.InterpType.BILINEAR
         )
 
     IMG_CACHE[url] = pixbuf
@@ -32,17 +32,70 @@ def cache_pixbuf(url, pixbuf):
         IMG_CACHE.popitem(last=False)
 
 
-def get_high_res_url(url):
-    """Rewrites Google Image URLs to request an 800x800 resolution."""
+def get_high_res_url(url, target_size=None):
+    """Rewrites Google Image URLs to request a high resolution (800x800).
+    Also strips sqp and rs parameters which constrain resolution.
+    """
     if not url:
         return url
-    if "googleusercontent.com" in url or "ggpht.com" in url:
+
+    # 1. Clean up parameters that constrain resolution
+    # Strip sqp and rs which are often used to force small/safe thumbnails
+    # The regex handles ?sqp=..., &sqp=..., and trailing separators
+    clean_url = re.sub(r"([?&])(sqp|rs)=[^&]*&?", r"\1", url)
+    clean_url = clean_url.replace("?&", "?").rstrip("?&")
+
+    # 2. Upgrade resolution/quality based on domain
+    if "i.ytimg.com" in clean_url:
+        for q in _YTIMG_QUALITIES:
+            if q in clean_url:
+                return clean_url.replace(q, "maxresdefault")
+        return clean_url
+
+    if "googleusercontent.com" in clean_url or "ggpht.com" in clean_url:
         # If it has w/h, only update those and ignore s
-        if re.search(r"([=-])w\d+-h\d+", url):
-            return re.sub(r"([=-])w\d+-h\d+", r"\1w800-h800", url)
-        # Otherwise update s, but only if it looks like a parameter (at end or followed by hyphen)
-        return re.sub(r"([=-])s\d+(?=-|$)", r"\1s800", url)
-    return url
+        if re.search(r"([=-])w\d+-h\d+", clean_url):
+            return re.sub(r"([=-])w\d+-h\d+", r"\1w800-h800", clean_url)
+        # Otherwise update s
+        return re.sub(r"([=-])s\d+(?=-|$)", r"\1s800", clean_url)
+
+    return clean_url
+
+
+_YTIMG_QUALITIES = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"]
+
+
+def get_ytimg_fallbacks(url):
+    """For YouTube video thumbnail URLs (i.ytimg.com/vi/...), generate
+    a fallback chain from the current quality downward.
+    Returns a list of fallback URLs (excluding the primary URL).
+    """
+    if not url or "i.ytimg.com/vi/" not in url:
+        return []
+
+    # Find which quality is currently in the URL
+    current_idx = -1
+    for i, q in enumerate(_YTIMG_QUALITIES):
+        if q in url:
+            current_idx = i
+            break
+
+    if current_idx < 0:
+        # If no known quality is in the URL, provide the full chain
+        # try to guess where in the path the quality name would be
+        # (usually after /vi/VIDEO_ID/)
+        match = re.search(r"/vi/[^/]+/", url)
+        if match:
+            base = url[: match.end()]
+            return [f"{base}{q}.jpg" for q in _YTIMG_QUALITIES]
+        return []
+
+    # Generate fallbacks from the next quality downward
+    fallbacks = []
+    current_q = _YTIMG_QUALITIES[current_idx]
+    for q in _YTIMG_QUALITIES[current_idx + 1 :]:
+        fallbacks.append(url.replace(current_q, q))
+    return fallbacks
 
 
 def copy_to_clipboard(text):
@@ -145,9 +198,17 @@ def parse_item_metadata(item):
 
 class AsyncImage(Gtk.Image):
     def __init__(
-        self, url=None, size=None, width=None, height=None, circular=False, **kwargs
+        self,
+        url=None,
+        size=None,
+        width=None,
+        height=None,
+        circular=False,
+        player=None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
+        self.player = player
 
         # Determine target dimensions
         self.target_w = width if width else size
@@ -175,19 +236,26 @@ class AsyncImage(Gtk.Image):
     # ... (load_url, _fetch_image same) ...
 
     def load_url(self, url, **kwargs):
-        url = get_high_res_url(url)
+        orig_url = url
+        url = get_high_res_url(url, self.target_w)
         self.url = url
         if not url:
             self.set_from_icon_name("image-missing-symbolic")
             return
 
-        print(f"[IMAGE-LOAD] AsyncImage url={url}")
         cached_pixbuf = IMG_CACHE.get(url)
         if cached_pixbuf:
             IMG_CACHE.move_to_end(url)
 
+        fallbacks = kwargs.get("fallbacks") or get_ytimg_fallbacks(url)
+        # Prioritize the clean fallback versions.
+        # If url (clean) is different from orig_url (constrained),
+        # add orig_url to the END of the fallback list as a last resort.
+        if url != orig_url and orig_url not in fallbacks:
+            fallbacks.append(orig_url)
+
         thread = threading.Thread(
-            target=self._fetch_image, args=(url, kwargs.get("fallbacks"), cached_pixbuf)
+            target=self._fetch_image, args=(url, fallbacks, cached_pixbuf)
         )
         thread.daemon = True
         thread.start()
@@ -214,7 +282,9 @@ class AsyncImage(Gtk.Image):
                     if w > max_dim or h > max_dim:
                         scale = max_dim / max(w, h)
                         pixbuf = pixbuf.scale_simple(
-                            int(w * scale), int(h * scale), GdkPixbuf.InterpType.HYPER
+                            int(w * scale),
+                            int(h * scale),
+                            GdkPixbuf.InterpType.BILINEAR,
                         )
 
                     cache_pixbuf(url, pixbuf)
@@ -235,7 +305,9 @@ class AsyncImage(Gtk.Image):
                 new_h = int(h * scale)
 
                 # Scale properly
-                scaled = pixbuf.scale_simple(new_w, new_h, GdkPixbuf.InterpType.HYPER)
+                scaled = pixbuf.scale_simple(
+                    new_w, new_h, GdkPixbuf.InterpType.BILINEAR
+                )
 
                 # Center crop to target dimensions
                 final_pixbuf = scaled
@@ -255,11 +327,14 @@ class AsyncImage(Gtk.Image):
                 # Apply on main thread
                 GLib.idle_add(self._apply_pixbuf, final_pixbuf, url)
 
-        except Exception as e:
-            print(f"Failed to load image {url}: {e}")
+        except Exception:
             if fallbacks and self.url == url:
                 next_url = fallbacks.pop(0)
                 self.url = next_url  # Update current URL to match the fallback
+
+                # If we have a player, notify it about the working fallback URL
+                # when it finally succeeds. This is handled in _apply_pixbuf.
+
                 print(f"Trying fallback: {next_url}")
                 self._fetch_image(next_url, fallbacks)
 
@@ -268,8 +343,27 @@ class AsyncImage(Gtk.Image):
         if url and self.url != url:
             return
 
+        # Notify player of working URL if it's different from what we started with
+        if self.player and url and "ytimg.com" in url:
+            # We only want to notify if this is a fallback that worked
+            # or if the URL was resolved from a 404.
+            # We'll rely on the player to handle the update logic.
+            GLib.idle_add(self._sync_player_url, url)
+
         texture = Gdk.Texture.new_for_pixbuf(pixbuf)
         self.set_from_paintable(texture)
+
+    def _sync_player_url(self, url):
+        if not self.player or not url:
+            return
+        # Find current track and update its thumb if it matches
+        if hasattr(self.player, "update_track_thumbnail"):
+            # We don't know the video_id here easily without storing it,
+            # but usually the image loading is for the 'currently playing' or 'item in list'.
+            # To be safe, we'll only sync if this widget was explicitly given a video_id.
+            video_id = getattr(self, "video_id", None)
+            if video_id:
+                self.player.update_track_thumbnail(video_id, url)
 
     def set_from_file(self, file):
         """Optimistically set image from a local file object (GFile)"""
@@ -296,13 +390,28 @@ def subprocess_pixbuf(pixbuf, x, y, w, h):
 class AsyncPicture(Gtk.Picture):
     # Added crop_to_square parameter
     def __init__(
-        self, url=None, crop_to_square=False, icon_name=None, target_size=None, **kwargs
+        self,
+        url=None,
+        crop_to_square=False,
+        icon_name=None,
+        target_size=None,
+        player=None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
+        self.player = player
         self.set_content_fit(Gtk.ContentFit.COVER)
         self.crop_to_square = crop_to_square
         self.target_size = target_size
         self.url = url
+
+        # Constrain the picture widget to target_size so it doesn't
+        # request more space when a non-square texture is loaded
+        if target_size:
+            self.set_size_request(target_size, target_size)
+            self.set_hexpand(False)
+            self.set_vexpand(False)
+
         if icon_name:
             self.set_from_icon_name(icon_name)
         elif url:
@@ -326,7 +435,8 @@ class AsyncPicture(Gtk.Picture):
             self.set_paintable(None)
 
     def load_url(self, url, **kwargs):
-        url = get_high_res_url(url)
+        orig_url = url
+        url = get_high_res_url(url, self.target_size)
         self.url = url
         if not url:
             self.set_paintable(None)
@@ -338,76 +448,114 @@ class AsyncPicture(Gtk.Picture):
             GLib.idle_add(self._apply_pixbuf, pixbuf, url)
             return
 
+        fallbacks = kwargs.get("fallbacks") or get_ytimg_fallbacks(url)
+        # Prioritize the clean fallback versions.
+        # If url (clean) is different from orig_url (constrained),
+        # add orig_url to the END of the fallback list as a last resort.
+        if url != orig_url and orig_url not in fallbacks:
+            fallbacks.append(orig_url)
+
         target_size = self.target_size
         crop = self.crop_to_square
+
         threading.Thread(
-            target=self._fetch_image, args=(url, target_size, crop), daemon=True
+            target=self._fetch_image,
+            args=(url, target_size, crop, fallbacks),
+            daemon=True,
         ).start()
 
-    def _fetch_image(self, url, target_size=None, crop=False):
+    def _fetch_image(self, url, target_size=None, crop=False, fallbacks=None):
         try:
             # We use MusicClient's session if possible or just requests
             import requests
 
             # Reuse connection if possible
             resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                loader = GdkPixbuf.PixbufLoader()
-                loader.write(resp.content)
-                loader.close()
-                pixbuf = loader.get_pixbuf()
+            if resp.status_code != 200:
+                raise Exception(f"HTTP {resp.status_code}")
 
-                if pixbuf:
+            loader = GdkPixbuf.PixbufLoader()
+            loader.write(resp.content)
+            loader.close()
+            pixbuf = loader.get_pixbuf()
+
+            if pixbuf:
+                w = pixbuf.get_width()
+                h = pixbuf.get_height()
+
+                # Scale to max_dim=1600 for high-quality caching
+                max_dim = 1600
+                if w > max_dim or h > max_dim:
+                    scale = max_dim / max(w, h)
+                    pixbuf = pixbuf.scale_simple(
+                        int(w * scale),
+                        int(h * scale),
+                        GdkPixbuf.InterpType.BILINEAR,
+                    )
                     w = pixbuf.get_width()
                     h = pixbuf.get_height()
 
-                    if crop:
-                        sz = min(w, h)
-                        pixbuf = pixbuf.new_subpixbuf(
-                            (w - sz) // 2, (h - sz) // 2, sz, sz
-                        )
-                        w = h = sz
+                # Cache the high-res version BEFORE potential thumbnail downscaling
+                cache_pixbuf(url, pixbuf)
 
-                    # Scale to max_dim=1600 for high-quality caching
-                    max_dim = 1600
-                    if w > max_dim or h > max_dim:
-                        scale = max_dim / max(w, h)
+                if target_size:
+                    # Scale to 2x for HiDPI quality (this is the widget-specific version)
+                    tw = target_size * 2
+                    th = target_size * 2
+                    if w > tw or h > th:
+                        scale = max(tw / w, th / h)
                         pixbuf = pixbuf.scale_simple(
                             int(w * scale),
                             int(h * scale),
-                            GdkPixbuf.InterpType.HYPER,
+                            GdkPixbuf.InterpType.BILINEAR,
                         )
-                        w = pixbuf.get_width()
-                        h = pixbuf.get_height()
 
-                    # Cache the high-res version BEFORE potential thumbnail downscaling
-                    cache_pixbuf(url, pixbuf)
+            GLib.idle_add(self._apply_pixbuf, pixbuf, url)
 
-                    if target_size:
-                        # Scale to 2x for HiDPI quality (this is the widget-specific version)
-                        tw = target_size * 2
-                        th = target_size * 2
-                        if w > tw or h > th:
-                            scale = max(tw / w, th / h)
-                            pixbuf = pixbuf.scale_simple(
-                                int(w * scale),
-                                int(h * scale),
-                                GdkPixbuf.InterpType.HYPER,
-                            )
-
-                GLib.idle_add(self._apply_pixbuf, pixbuf, url)
-
-        except Exception as e:
-            print(f"AsyncPicture error {url}: {e}")
+        except Exception:
+            if fallbacks and self.url == url:
+                next_url = fallbacks.pop(0)
+                self.url = next_url
+                self._fetch_image(next_url, target_size, crop, fallbacks)
+            else:
+                # Silently fail for list items to avoid spamming console
+                # but keep error for single loads
+                pass
 
     def _apply_pixbuf(self, pixbuf, url=None):
         # Race condition check
         if url and self.url != url:
             return
 
+        if not pixbuf:
+            self.set_paintable(None)
+            return
+
+        # Notify player of working URL
+        if self.player and url and "ytimg.com" in url:
+            GLib.idle_add(self._sync_player_url, url)
+
+        # Crop to center square if requested
+        if self.crop_to_square and pixbuf:
+            w = pixbuf.get_width()
+            h = pixbuf.get_height()
+            if w != h:
+                size = min(w, h)
+                x_off = (w - size) // 2
+                y_off = (h - size) // 2
+                pixbuf = pixbuf.new_subpixbuf(x_off, y_off, size, size)
+
         # Convert to Texture and paint
         texture = Gdk.Texture.new_for_pixbuf(pixbuf)
         self.set_paintable(texture)
+
+    def _sync_player_url(self, url):
+        if not self.player or not url:
+            return
+        if hasattr(self.player, "update_track_thumbnail"):
+            video_id = getattr(self, "video_id", None)
+            if video_id:
+                self.player.update_track_thumbnail(video_id, url)
 
 
 class MarqueeLabel(Gtk.ScrolledWindow):

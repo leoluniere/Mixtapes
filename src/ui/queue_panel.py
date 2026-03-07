@@ -196,7 +196,7 @@ class QueuePanel(Gtk.Box):
         header.append(self.repeat_btn)
 
         clear_btn = Gtk.Button(label="Clear")
-        clear_btn.connect("clicked", lambda x: self.player.clear_queue())
+        clear_btn.connect("clicked", self._on_clear_clicked)
         header.append(clear_btn)
 
         # More Menu
@@ -432,3 +432,9 @@ class QueuePanel(Gtk.Box):
         root = self.get_root()
         if hasattr(root, "add_toast"):
             root.add_toast(message)
+
+    def _on_clear_clicked(self, btn):
+        self.player.clear_queue()
+        root = self.get_root()
+        if hasattr(root, "split_view"):
+            root.split_view.set_show_sidebar(False)

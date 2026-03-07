@@ -225,7 +225,12 @@ class LibraryPage(Adw.Bin):
 
                 from ui.utils import AsyncPicture
 
-                img = AsyncPicture(url=thumb_url, target_size=44, crop_to_square=True)
+                img = AsyncPicture(
+                    url=thumb_url,
+                    target_size=44,
+                    crop_to_square=True,
+                    player=self.player,
+                )
                 img.add_css_class("song-img")
                 if not thumb_url:
                     img.set_from_icon_name("media-playlist-audio-symbolic")
@@ -266,6 +271,14 @@ class LibraryPage(Adw.Bin):
                 gesture.set_button(3)
                 gesture.connect("released", self.on_row_right_click, row)
                 row.add_controller(gesture)
+
+                # Long Press for touch
+                lp = Gtk.GestureLongPress()
+                lp.connect(
+                    "pressed",
+                    lambda g, x, y, r=row: self.on_row_right_click(g, 1, x, y, r),
+                )
+                row.add_controller(lp)
 
                 self.playlists_list.insert(row, i)
 
@@ -491,7 +504,12 @@ class LibraryPage(Adw.Bin):
 
                 from ui.utils import AsyncPicture
 
-                img = AsyncPicture(url=thumb_url, target_size=44, crop_to_square=True)
+                img = AsyncPicture(
+                    url=thumb_url,
+                    target_size=44,
+                    crop_to_square=True,
+                    player=self.player,
+                )
                 img.add_css_class("song-img")
                 if not thumb_url:
                     img.set_from_icon_name("avatar-default-symbolic")

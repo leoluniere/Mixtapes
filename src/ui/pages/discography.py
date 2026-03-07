@@ -242,6 +242,14 @@ class DiscographyPage(Adw.Bin):
             gesture.connect("pressed", self.on_grid_right_click, item_box)
             item_box.add_controller(gesture)
 
+            # Long Press for touch
+            lp = Gtk.GestureLongPress()
+            lp.connect(
+                "pressed",
+                lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib),
+            )
+            item_box.add_controller(lp)
+
     def on_grid_child_activated(self, flowbox, child):
         box = child.get_child()
         if not hasattr(box, "item_data"):

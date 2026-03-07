@@ -4,9 +4,11 @@ import random
 import os
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst, GObject, GLib
+from gi.repository import Gst, GObject, GLib, GdkPixbuf
+import urllib.request
 from yt_dlp import YoutubeDL
 from mprisify.server import Server
+from ui.utils import get_high_res_url, get_ytimg_fallbacks
 from player.mpris import MuseMprisAdapter, MuseEventAdapter
 from api.client import MusicClient
 
@@ -61,6 +63,7 @@ class Player(GObject.Object):
         self.shuffle_mode = False
         self.original_queue = []  # Backup for un-shuffle
         self.load_generation = 0  # To handle race conditions in loading
+        self.mpris_art_url = None
         self.current_url = None
         self.last_seek_time = 0.0
         self.duration = -1
@@ -244,6 +247,7 @@ class Player(GObject.Object):
         self.queue = []
         self.original_queue = []
         self.current_queue_index = -1
+        self.current_video_id = None
         self.emit("state-changed", "stopped")
         self.emit("metadata-changed", "", "", "", "", "INDIFFERENT")
 
@@ -378,26 +382,31 @@ class Player(GObject.Object):
                 flush=True,
             )
 
-            # Metadata Normalization (Handle raw ytmusicapi data)
+            # Metadata Normalization & Persistence
+            # Handle raw ytmusicapi data and ensure persistent strings in the queue
             if not artist and track.get("artists"):
                 artist = ", ".join(
                     [str(a.get("name", "")) for a in track.get("artists") if a]
                 )
 
-            if not artist:
-                artist = "Unknown"
+            if isinstance(artist, list):
+                artist = ", ".join([str(a.get("name", "")) for a in artist])
+
+            artist = str(artist or "Unknown")
 
             if not thumb and track.get("thumbnails"):
                 thumbs = track.get("thumbnails")
                 if thumbs:
                     thumb = thumbs[-1]["url"]
 
-            # Handle artist list if needed (legacy check)
-            if isinstance(artist, list):
-                artist = ", ".join([str(a.get("name", "")) for a in artist])
-
-            artist = str(artist or "Unknown")
             thumb = str(thumb or "")
+            if "ytimg.com" in thumb:
+                thumb = get_high_res_url(thumb)
+
+            # SAVE BACK TO QUEUE to ensure UI refreshes (like fallbacks) use normalized strings
+            track["artist"] = artist
+            track["title"] = title
+            track["thumb"] = thumb
 
             self._load_internal(video_id, title, artist, thumb, like_status)
 
@@ -428,6 +437,10 @@ class Player(GObject.Object):
             str(video_id),
             str(like_status),
         )
+
+        # Trigger MPRIS art sync in background
+        if thumbnail_url:
+            self._sync_mpris_art(thumbnail_url, video_id)
 
         GLib.idle_add(self._update_logical_state)
 
@@ -486,6 +499,50 @@ class Player(GObject.Object):
             self.queue.extend(tracks)
 
         self.emit("state-changed", "queue-updated")
+
+    def update_track_thumbnail(self, video_id, working_url):
+        """
+        Updates the thumbnail URL for a track if a better/working one is found.
+        This is called by UI components (AsyncPicture/AsyncImage) when they
+        successfully resolve a fallback URL.
+        """
+        if not video_id or not working_url:
+            return
+
+        changed = False
+        # Update in current queue
+        for track in self.queue:
+            if track.get("videoId") == video_id:
+                if track.get("thumb") != working_url:
+                    track["thumb"] = working_url
+                    changed = True
+
+        # Update in original queue
+        for track in self.original_queue:
+            if track.get("videoId") == video_id:
+                track["thumb"] = working_url
+
+        if changed:
+            # If this is the currently playing track, re-emit metadata to update MPRIS
+            current_track = (
+                self.queue[self.current_queue_index]
+                if 0 <= self.current_queue_index < len(self.queue)
+                else None
+            )
+            if current_track and current_track.get("videoId") == video_id:
+                print(
+                    f"[PLAYER] Updating working thumbnail for {video_id}: {working_url}"
+                )
+                # Re-emit metadata changed to trigger MPRIS update
+                self.emit(
+                    "metadata-changed",
+                    current_track.get("title", ""),
+                    current_track.get("artist", ""),
+                    working_url,
+                    video_id,
+                    current_track.get("likeStatus", "INDIFFERENT"),
+                )
+                self._sync_mpris_art(working_url, video_id)
 
     def _start_infinite_fetch(self):
         self._is_fetching_infinite = True
@@ -647,6 +704,16 @@ class Player(GObject.Object):
                 print(f"Playing: {final_title} by {final_artist}")
 
                 final_thumb = thumb_hint or fetched_thumb or ""
+                if "ytimg.com" in final_thumb:
+                    final_thumb = get_high_res_url(final_thumb)
+
+                # Update the queue track if possible so subsequent refreshes find it
+                if 0 <= self.current_queue_index < len(self.queue):
+                    track = self.queue[self.current_queue_index]
+                    if track.get("videoId") == video_id:
+                        track["title"] = final_title
+                        track["artist"] = final_artist
+                        track["thumb"] = final_thumb
 
                 # Check generation again before playing
                 if generation != self.load_generation:
@@ -749,6 +816,70 @@ class Player(GObject.Object):
     def get_state_string(self):
         """Returns the current logical player state."""
         return self._current_logical_state
+
+    def _sync_mpris_art(self, url, video_id):
+        """Downloads, crops, and saves artwork locally for MPRIS with fallback support."""
+        if not url:
+            return
+
+        def job(current_url, fallbacks=None):
+            if not current_url or self.current_video_id != video_id:
+                return
+
+            try:
+                # 1. Ensure we use clean high-res URL if not already provided
+                if fallbacks is None:
+                    clean_url = get_high_res_url(current_url)
+                    fallbacks = get_ytimg_fallbacks(clean_url)
+                    if current_url != clean_url and current_url not in fallbacks:
+                        fallbacks.append(current_url)
+                    fetch_url = clean_url
+                else:
+                    fetch_url = current_url
+
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                }
+                req = urllib.request.Request(fetch_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = resp.read()
+
+                # 2. Load and Crop
+                loader = GdkPixbuf.PixbufLoader()
+                loader.write(data)
+                loader.close()
+                pixbuf = loader.get_pixbuf()
+
+                if pixbuf:
+                    w = pixbuf.get_width()
+                    h = pixbuf.get_height()
+                    size = min(w, h)
+                    pixbuf = pixbuf.new_subpixbuf(
+                        (w - size) // 2, (h - size) // 2, size, size
+                    )
+
+                    # 3. Save to cache
+                    cache_dir = os.path.join(GLib.get_user_cache_dir(), "mixtapes")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    target_path = os.path.join(cache_dir, "mpris_art.jpg")
+
+                    pixbuf.savev(target_path, "jpeg", ["quality"], ["90"])
+                    self.mpris_art_url = f"file://{target_path}"
+
+                    # 4. Notify MPRIS to refresh metadata with the NEW local URL
+                    if hasattr(self, "mpris_events"):
+                        GLib.idle_add(self.mpris_events.on_player_all)
+
+            except Exception as e:
+                if fallbacks:
+                    next_url = fallbacks.pop(0)
+                    print(f"[PLAYER] MPRIS art fallback to: {next_url}")
+                    job(next_url, fallbacks)
+                else:
+                    print(f"[PLAYER] MPRIS art sync failed: {e}")
+
+        thread = threading.Thread(target=job, args=(url,), daemon=True)
+        thread.start()
 
     def update_position(self):
         import time

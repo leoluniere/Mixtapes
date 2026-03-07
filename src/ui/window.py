@@ -167,7 +167,21 @@ class MainWindow(Adw.ApplicationWindow):
             on_album_click=self.on_player_bar_album_click,
         )
         self.player_bar.connect("expand-requested", self.on_expand_requested)
-        self.root_content_view.add_bottom_bar(self.player_bar)
+
+        # Wrap in Revealer for autohide when queue is empty
+        self.player_bar_revealer = Gtk.Revealer()
+        self.player_bar_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_UP
+        )
+        self.player_bar_revealer.set_transition_duration(200)
+        self.player_bar_revealer.set_reveal_child(len(self.player.queue) > 0)
+        self.player_bar_revealer.set_overflow(Gtk.Overflow.VISIBLE)
+        self.player_bar_revealer.set_child(self.player_bar)
+        self.root_content_view.add_bottom_bar(self.player_bar_revealer)
+
+        # Connect signals to auto-show/hide player bar
+        self.player.connect("state-changed", self._on_player_bar_visibility)
+        self.player.connect("metadata-changed", self._on_player_bar_visibility)
 
         # View Switcher Bar (Mobile) - Stacked above Player Bar?
         self.view_switcher_bar = Adw.ViewSwitcherBar()
@@ -808,6 +822,10 @@ class MainWindow(Adw.ApplicationWindow):
         is_visible = split_view.get_show_sidebar()
         if hasattr(self, "player_bar"):
             self.player_bar.set_queue_active(is_visible)
+
+    def _on_player_bar_visibility(self, player, *args):
+        has_queue = len(self.player.queue) > 0
+        self.player_bar_revealer.set_reveal_child(has_queue)
 
     def _on_split_view_collapsed(self, split_view, param):
         is_collapsed = split_view.get_collapsed()

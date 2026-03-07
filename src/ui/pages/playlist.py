@@ -43,6 +43,7 @@ class PlaylistPage(Adw.Bin):
         self.playlist_description_text = ""
         self._is_previewing_cover = False
         self.is_owned = False
+        self.is_editable = False
 
         # ── 1. Header UI Container ────────────────────────────────────────────
         self.header_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -54,13 +55,14 @@ class PlaylistPage(Adw.Bin):
         )
         self.header_info_box.set_valign(Gtk.Align.START)
 
-        self.cover_img = AsyncImage(size=200)
+        self.cover_img = AsyncImage(size=200, player=self.player)
         self.cover_img.set_valign(Gtk.Align.START)
 
         self.cover_wrapper = Gtk.Box()
         self.cover_wrapper.set_overflow(Gtk.Overflow.HIDDEN)
         self.cover_wrapper.add_css_class("rounded")
         self.cover_wrapper.set_valign(Gtk.Align.START)
+        self.cover_wrapper.set_size_request(200, 200)
         self.cover_wrapper.append(self.cover_img)
         self.header_info_box.append(self.cover_wrapper)
 
@@ -68,6 +70,11 @@ class PlaylistPage(Adw.Bin):
         cover_gesture.set_button(3)
         cover_gesture.connect("pressed", self.on_cover_right_click)
         self.cover_wrapper.add_controller(cover_gesture)
+
+        # Long Press for touch
+        lp = Gtk.GestureLongPress()
+        lp.connect("pressed", lambda g, x, y: self.on_cover_right_click(g, 1, x, y))
+        self.cover_wrapper.add_controller(lp)
 
         self.details_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.details_col.set_valign(Gtk.Align.CENTER)
@@ -299,7 +306,7 @@ class PlaylistPage(Adw.Bin):
 
         from ui.utils import AsyncPicture
 
-        img = AsyncPicture(crop_to_square=True, target_size=44)
+        img = AsyncPicture(crop_to_square=True, target_size=44, player=self.player)
         img.add_css_class("song-img")
         row.append(img)
         row._lv_img = img
@@ -367,6 +374,13 @@ class PlaylistPage(Adw.Bin):
         gesture.connect("released", self._on_row_right_click_gesture)
         row.add_controller(gesture)
 
+        # Long Press for touch
+        lp = Gtk.GestureLongPress()
+        lp.connect(
+            "pressed", lambda g, x, y: self._on_row_right_click_gesture(g, 1, x, y)
+        )
+        row.add_controller(lp)
+
         # Left Click Gesture instead of list_view activate
         left_click = Gtk.GestureClick()
         left_click.set_button(1)
@@ -410,9 +424,6 @@ class PlaylistPage(Adw.Bin):
 
         # Album view: show track number instead of thumbnail
         is_album = getattr(self, "_is_album_view", False)
-        print(
-            f"DEBUG-BIND-ALBUM: playlist_id={self.playlist_id} is_album={is_album} track={title}"
-        )
         if is_album:
             position = list_item.get_position()
             # The list contains a header at index 0, so the first track is at index 1.
@@ -425,9 +436,11 @@ class PlaylistPage(Adw.Bin):
             row._lv_track_num.set_visible(False)
             row._lv_img.set_visible(True)
             if thumb_url:
+                row._lv_img.video_id = t.get("videoId")
                 if row._lv_img.url != thumb_url:
                     row._lv_img.load_url(thumb_url)
             else:
+                row._lv_img.video_id = None
                 row._lv_img.set_from_icon_name("media-optical-symbolic")
                 row._lv_img.url = None
 
@@ -1051,7 +1064,8 @@ class PlaylistPage(Adw.Bin):
         self.sort_row.set_visible(has_tracks and not is_album)
 
         self.is_owned = is_owned
-        is_editable = self.client.is_authenticated() and not is_album and is_owned
+        self.is_editable = self.client.is_authenticated() and not is_album and is_owned
+        is_editable = self.is_editable
 
         # Dynamically rebuild the menu to show/hide Edit/Delete
         self._refresh_more_menu(is_owned=is_editable)
@@ -1479,7 +1493,7 @@ class PlaylistPage(Adw.Bin):
 
     def on_cover_right_click(self, gesture, n_press, x, y):
         url = getattr(self.cover_img, "url", None)
-        can_edit = self.edit_btn.get_visible()
+        can_edit = self.is_editable
 
         if not url and not can_edit:
             return

@@ -10,7 +10,7 @@ class ExpandedPlayer(Gtk.Box):
         pass
 
     def _make_cover(self):
-        img = AsyncPicture(crop_to_square=True)
+        img = AsyncPicture(crop_to_square=True, player=self.player)
         img.add_css_class("rounded")
         img.set_halign(Gtk.Align.FILL)
         img.set_valign(Gtk.Align.FILL)
@@ -279,13 +279,10 @@ class ExpandedPlayer(Gtk.Box):
         self.artist_label.set_label(artist)
 
         if thumbnail_url:
-            url_max = thumbnail_url.replace("w120-h120", "w640-h640").replace(
-                "sddefault", "maxresdefault"
-            )
-            url_sd = url_max.replace("maxresdefault", "sddefault")
-            url_hq = url_max.replace("maxresdefault", "hqdefault")
-            self.cover_img.load_url(url_max, fallbacks=[url_hq, url_sd])
+            self.cover_img.video_id = video_id
+            self.cover_img.load_url(thumbnail_url)
         else:
+            self.cover_img.video_id = None
             self.cover_img.load_url(None)
 
         if video_id:
@@ -314,9 +311,7 @@ class ExpandedPlayer(Gtk.Box):
             if thumbs:
                 thumb = thumbs[-1]["url"]
         if thumb:
-            return thumb.replace("w120-h120", "w640-h640").replace(
-                "sddefault", "maxresdefault"
-            )
+            return thumb
         return None
 
     def _sync_carousel_queue(self):
@@ -369,33 +364,19 @@ class ExpandedPlayer(Gtk.Box):
                     if not cover.get_visible():
                         cover.set_visible(True)
 
-                    # Target High-Res for actively playing song
-                    if i == self.player.current_queue_index:
-                        url_max = thumb.replace("w120-h120", "w640-h640").replace(
-                            "sddefault", "maxresdefault"
-                        )
-                        target_url = url_max
-                        fallbacks = [
-                            url_max.replace("maxresdefault", "hqdefault"),
-                            url_max.replace("maxresdefault", "sddefault"),
-                        ]
-                    else:
-                        target_url = thumb
-                        fallbacks = [
-                            thumb.replace("maxresdefault", "hqdefault"),
-                            thumb.replace("maxresdefault", "sddefault"),
-                        ]
-
-                    if cover.url != target_url:
-                        cover.load_url(target_url, fallbacks=fallbacks)
+                    if cover.url != thumb:
+                        cover.video_id = self.player.queue[i].get("videoId")
+                        cover.load_url(thumb)
                 else:
                     if cover.get_visible():
                         cover.set_visible(False)
+                    cover.video_id = None
                     if cover.url is not None:
                         cover.load_url(None)
             else:
                 if not cover.get_visible():
                     cover.set_visible(True)
+                cover.video_id = None
                 if cover.url is not None:
                     cover.load_url(None)
 
@@ -436,17 +417,14 @@ class ExpandedPlayer(Gtk.Box):
             self.player.play()
 
     def on_state_changed(self, player, state):
-        print(f"DEBUG-EXPANDED-STATE-START: state={state}")
         if state == "queue-updated":
             self._sync_carousel_queue()
-            print("DEBUG-EXPANDED-STATE-END (queue-updated)")
             return
 
         if state == "loading":
             self.play_btn_stack.set_visible_child_name("spinner")
             self.play_btn.set_sensitive(False)
             self._is_buffering_spinner = True
-            print("DEBUG-EXPANDED-STATE-END (loading)")
             return
 
         if state == "playing" and self.player.duration <= 0:
@@ -454,7 +432,6 @@ class ExpandedPlayer(Gtk.Box):
             self.play_btn_stack.set_visible_child_name("spinner")
             self.play_btn.set_sensitive(False)
             self._is_buffering_spinner = True
-            print("DEBUG-EXPANDED-STATE-END (playing-buffering)")
             return
 
         if (
@@ -463,7 +440,6 @@ class ExpandedPlayer(Gtk.Box):
             and state in ("paused", "stopped")
         ):
             # Still buffering—keep spinner visible
-            print("DEBUG-EXPANDED-STATE-END (still-buffering)")
             return
 
         self._is_buffering_spinner = False
@@ -475,7 +451,6 @@ class ExpandedPlayer(Gtk.Box):
             else "media-playback-start-symbolic"
         )
         self.play_icon.set_from_icon_name(icon)
-        print("DEBUG-EXPANDED-STATE-END")
 
     def on_volume_scale_changed(self, scale):
         self.player.set_volume(scale.get_value())
@@ -542,7 +517,6 @@ class ExpandedPlayer(Gtk.Box):
             return
 
         if new_idx != self.player.current_queue_index:
-            print(f"DEBUG Carousel: Swiped directly to queue index {new_idx}")
             self._ignore_page_change = True
 
             if 0 <= new_idx < len(self.player.queue):

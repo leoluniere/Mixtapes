@@ -64,7 +64,7 @@ class ArtistPage(Adw.Bin):
         self.banner_overlay.set_size_request(-1, 260)
 
         # Banner Image
-        self.avatar = AsyncPicture()
+        self.avatar = AsyncPicture(player=self.player)
         self.avatar.set_hexpand(True)
         self.avatar.set_vexpand(True)
         self.avatar.set_halign(Gtk.Align.FILL)
@@ -409,7 +409,13 @@ class ArtistPage(Adw.Bin):
             thumb_url = thumbnails[-1]["url"] if thumbnails else None
             from ui.utils import AsyncPicture
 
-            img = AsyncPicture(url=thumb_url, target_size=44, crop_to_square=True)
+            img = AsyncPicture(
+                url=thumb_url,
+                target_size=44,
+                crop_to_square=True,
+                player=self.player,
+            )
+            img.video_id = item.get("videoId")
             img.add_css_class("song-img")
             box.append(img)
 
@@ -505,6 +511,14 @@ class ArtistPage(Adw.Bin):
             gesture.set_button(3)
             gesture.connect("pressed", self.on_song_right_click, row)
             row.add_controller(gesture)
+
+            # Long Press for touch
+            lp = Gtk.GestureLongPress()
+            lp.connect(
+                "pressed",
+                lambda g, x, y, r=row: self.on_song_right_click(g, 1, x, y, r),
+            )
+            row.add_controller(lp)
 
         section_box.append(list_box)
 
@@ -620,7 +634,10 @@ class ArtistPage(Adw.Bin):
             item_box.item_data = item
             item_box.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
 
-            img = AsyncImage(url=thumb_url, size=140)
+            img = AsyncImage(url=thumb_url, size=140, player=self.player)
+            img.video_id = (
+                item.get("videoId") or item.get("playlistId") or item.get("browseId")
+            )
 
             wrapper = Gtk.Box()
             wrapper.set_overflow(Gtk.Overflow.HIDDEN)
@@ -688,6 +705,14 @@ class ArtistPage(Adw.Bin):
             gesture.set_button(3)
             gesture.connect("released", self.on_grid_right_click, item_box)
             item_box.add_controller(gesture)
+
+            # Long Press for touch
+            lp = Gtk.GestureLongPress()
+            lp.connect(
+                "pressed",
+                lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib),
+            )
+            item_box.add_controller(lp)
 
         # Load More Cell
         limit = self._section_limits.get(title, 10)

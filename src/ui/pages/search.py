@@ -254,7 +254,13 @@ class SearchPage(Adw.Bin):
             thumbnails = item.get("thumbnails", [])
             thumb_url = thumbnails[-1]["url"] if thumbnails else None
 
-            img = AsyncPicture(url=thumb_url, target_size=44, crop_to_square=True)
+            img = AsyncPicture(
+                url=thumb_url,
+                target_size=44,
+                crop_to_square=True,
+                player=self.player,
+            )
+            img.video_id = item.get("videoId")
             img.add_css_class("song-img")
             if not thumb_url:
                 img.set_from_icon_name("media-optical-symbolic")
@@ -308,6 +314,13 @@ class SearchPage(Adw.Bin):
             gesture.set_button(3)  # Right click
             gesture.connect("released", self.on_row_right_click, row)
             row.add_controller(gesture)
+
+            # Long Press for touch
+            lp = Gtk.GestureLongPress()
+            lp.connect(
+                "pressed", lambda g, x, y, r=row: self.on_row_right_click(g, 1, x, y, r)
+            )
+            row.add_controller(lp)
 
             list_box.append(row)
 

@@ -52,9 +52,16 @@ class PlayerBar(Gtk.Box):
         self.cover_btn.set_has_frame(False)
         self.cover_btn.connect("clicked", self._on_cover_btn_clicked)
 
-        self.cover_img = AsyncImage(size=48)
+        self.cover_img = AsyncImage(size=48, player=self.player)
         self.cover_img.set_pixel_size(48)
-        self.cover_btn.set_child(self.cover_img)
+
+        # Wrapper to clip cover art to rounded corners
+        self.cover_wrapper = Gtk.Box()
+        self.cover_wrapper.set_overflow(Gtk.Overflow.HIDDEN)
+        self.cover_wrapper.add_css_class("player-bar-cover")
+        self.cover_wrapper.append(self.cover_img)
+
+        self.cover_btn.set_child(self.cover_wrapper)
         content_box.append(self.cover_btn)
 
         # Metadata (Vertical)
@@ -331,6 +338,9 @@ class PlayerBar(Gtk.Box):
             background-color: white; 
             box-shadow: none; 
         }
+        .player-bar-cover {
+            border-radius: 6px;
+        }
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css.encode("utf-8"))
@@ -344,14 +354,15 @@ class PlayerBar(Gtk.Box):
     def on_metadata_changed(
         self, player, title, artist, thumbnail_url, video_id, like_status
     ):
-        print(f"DEBUG-BAR-META-START: video_id={video_id}")
         self.current_title = title
         self.current_artist = artist
         self.title_label.set_label(title)
         self.artist_label.set_label(artist)
         if thumbnail_url:
+            self.cover_img.video_id = video_id
             self.cover_img.load_url(thumbnail_url)
         else:
+            self.cover_img.video_id = None
             self.cover_img.load_url(None)
 
         if video_id:
@@ -364,7 +375,6 @@ class PlayerBar(Gtk.Box):
             self._is_buffering_spinner = True
             self._play_stack.set_visible_child_name("spinner")
             self.play_btn.set_sensitive(False)
-        print("DEBUG-BAR-META-END")
 
     def on_play_clicked(self, btn):
         if self.player.get_state_string() == "playing":
@@ -373,7 +383,6 @@ class PlayerBar(Gtk.Box):
             self.player.play()
 
     def on_state_changed(self, player, state):
-        print(f"DEBUG-BAR-STATE-START: state={state}")
         if state == "loading":
             self.scale.set_value(0)
             self.scale.set_sensitive(False)
@@ -397,7 +406,7 @@ class PlayerBar(Gtk.Box):
         elif state in ("paused", "stopped"):
             if self._is_buffering_spinner and self.player.duration <= 0:
                 # Still buffering—keep spinner visible
-                print("DEBUG-BAR-STATE-END")
+
                 return
             if state == "paused":
                 self.scale.set_sensitive(True)
@@ -405,7 +414,6 @@ class PlayerBar(Gtk.Box):
             self._play_stack.set_visible_child_name("icon")
             self.play_btn.set_sensitive(True)
             self._is_buffering_spinner = False
-        print("DEBUG-BAR-STATE-END")
 
     def _format_time(self, seconds):
         if seconds < 0:

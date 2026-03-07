@@ -219,11 +219,10 @@ class MuseMprisAdapter(MprisAdapter):
                 "xesam:artist": [artist],
             }
 
-            if thumb:
-                # High quality normalization
-                thumb = thumb.replace("w120-h120", "w640-h640").replace(
-                    "sddefault", "maxresdefault"
-                )
+            art_url = getattr(self.player, "mpris_art_url", None)
+            if art_url:
+                m["mpris:artUrl"] = art_url
+            elif thumb:
                 m["mpris:artUrl"] = thumb
 
             return m

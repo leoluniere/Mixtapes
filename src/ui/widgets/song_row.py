@@ -24,7 +24,7 @@ class SongRowWidget(Gtk.Box):
         self.append(self.row)
 
         # Image with playing indicator overlay
-        self.img = AsyncPicture(crop_to_square=True, target_size=44)
+        self.img = AsyncPicture(crop_to_square=True, target_size=44, player=self.player)
         self.img.add_css_class("song-img")
 
         self.img_overlay = Gtk.Overlay()
@@ -116,6 +116,11 @@ class SongRowWidget(Gtk.Box):
         gesture.connect("released", self.on_right_click)
         self.row.add_controller(gesture)
 
+        # Long Press for touch
+        lp = Gtk.GestureLongPress()
+        lp.connect("pressed", lambda g, x, y: self.on_right_click(g, 1, x, y))
+        self.row.add_controller(lp)
+
         # Gesture for Left Click (Activation)
         left_click = Gtk.GestureClick()
         left_click.set_button(1)
@@ -124,7 +129,6 @@ class SongRowWidget(Gtk.Box):
         self.row.add_controller(left_click)
 
     def bind(self, item, page):
-        print(f"[SONG-ROW-BIND] binding vid={item.video_id} title={item.title}")
         # Disconnect previous player signal handler
         if self._player_handler_id is not None:
             self.player.disconnect(self._player_handler_id)
@@ -161,6 +165,7 @@ class SongRowWidget(Gtk.Box):
         else:
             self.track_num_label.set_visible(False)
             self.img_overlay.set_visible(True)
+            self.img.video_id = item.video_id
             self.img.load_url(item.thumbnail_url)
 
         self.like_btn.set_data(item.video_id, item.like_status)
@@ -183,18 +188,11 @@ class SongRowWidget(Gtk.Box):
         )
 
     def _on_player_metadata_changed(self, player, *args):
-        print(
-            f"[SONG-ROW-META] handler called, my_vid={self.model_item.video_id if self.model_item else None} player_vid={player.current_video_id}"
-        )
         if self.model_item:
             is_playing = bool(
                 self.model_item.video_id
                 and self.model_item.video_id == player.current_video_id
             )
-            if is_playing:
-                print(
-                    f"[PLAYING-INDICATOR] match! vid={self.model_item.video_id} player={player.current_video_id}"
-                )
             self._apply_playing_state(is_playing)
 
     def stop_handlers(self):
@@ -215,9 +213,6 @@ class SongRowWidget(Gtk.Box):
 
     def _apply_playing_state(self, is_playing):
         if is_playing:
-            print(
-                f"[PLAYING-INDICATOR] Applying PLAYING state to row: {self.model_item.title if self.model_item else '?'}"
-            )
             self.row.add_css_class("playing")
             self.playing_indicator.set_visible(True)
             self._start_animation()
