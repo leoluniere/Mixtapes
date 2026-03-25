@@ -1,7 +1,7 @@
 <picture align="left" alt="Project logo">
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/omori-mixtape-dark.png" />
   <source media="(prefers-color-scheme: light)" srcset="screenshots/omori-mixtape.png" />
-  <img src="screenshots/omori-mixtape.png" />
+  <img align="left" height="75" src="screenshots/omori-mixtape.png" />
 </picture>
 
 # Mixtapes
