@@ -26,7 +26,7 @@ jobs:
           echo "Updated pkgver to $NEW_VER and reset pkgrel to 1"
 
       - name: Publish AUR package
-        uses: KSXGitHub/github-actions-deploy-aur@v3
+        uses: KSXGitHub/github-actions-deploy-aur@master
         with:
           pkgname: mixtapes-git
           pkgbuild: aur-package/PKGBUILD
