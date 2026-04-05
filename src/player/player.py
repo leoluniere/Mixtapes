@@ -524,7 +524,9 @@ class Player(GObject.Object):
         local_path = self.download_manager.get_local_path(video_id)
         if local_path:
             print(f"[OFFLINE] Playing local file: {local_path}")
-            GLib.idle_add(self._start_playback, f"file://{local_path}")
+            file_uri = GLib.filename_to_uri(os.path.abspath(local_path), None)
+            self._used_cached_url = False
+            GLib.idle_add(self._start_playback, file_uri)
             return
 
         # Check stream URL cache - skip yt-dlp if we have a valid cached URL
