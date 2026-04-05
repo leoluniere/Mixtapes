@@ -7,6 +7,23 @@ from gi.repository import Gtk, Gdk, GObject, GLib, GdkPixbuf
 
 print("DEBUG: Loading ui/utils.py v1.1 (Placeholder fix)")
 
+
+def is_online():
+    """Check if we have network connectivity. Respects force-offline setting."""
+    import json
+    prefs_path = os.path.join(GLib.get_user_data_dir(), "muse", "prefs.json")
+    try:
+        if os.path.exists(prefs_path):
+            with open(prefs_path) as f:
+                prefs = json.load(f)
+            if prefs.get("force_offline"):
+                return False
+    except Exception:
+        pass
+    from gi.repository import Gio
+    monitor = Gio.NetworkMonitor.get_default()
+    return monitor.get_network_available()
+
 # Bounded LRU Cache to prevent memory leaks (max 100 images)
 IMG_CACHE = collections.OrderedDict()
 MAX_CACHE_SIZE = 100
@@ -249,13 +266,54 @@ class AsyncImage(Gtk.Image):
         if url:
             self.load_url(url)
 
-    # ... (load_url, _fetch_image same) ...
+    @staticmethod
+    def _get_local_cover(video_id):
+        if not video_id:
+            return None
+        try:
+            from player.downloads import get_download_db, DownloadManager
+            db = get_download_db()
+            audio_path = db.get_local_path(video_id)
+            if audio_path:
+                cover_data = DownloadManager.extract_cover_from_file(audio_path)
+                if cover_data:
+                    cache_dir = os.path.join(GLib.get_user_cache_dir(), "muse", "covers")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cover_path = os.path.join(cache_dir, f"{video_id}.jpg")
+                    if not os.path.exists(cover_path):
+                        with open(cover_path, "wb") as f:
+                            f.write(cover_data)
+                    return f"file://{cover_path}"
+        except Exception:
+            pass
+        return None
 
     def load_url(self, url, **kwargs):
         orig_url = url
         url = get_high_res_url(url, self.target_w)
         self.url = url
+
+        vid = getattr(self, 'video_id', None)
+
+        # Always try local cover first for instant display
+        local = self._get_local_cover(vid) if vid else None
+        if local and local in IMG_CACHE:
+            self.url = local
+            self._apply_pixbuf(IMG_CACHE[local], local)
+            IMG_CACHE.move_to_end(local)
+            if not is_online():
+                return
+        elif local:
+            self.url = local
+            threading.Thread(
+                target=self._fetch_image, args=(local, [], None), daemon=True
+            ).start()
+            if not is_online():
+                return
+
         if not url:
+            if local:
+                return  # local cover thread already started above
             self.set_from_icon_name("image-missing-symbolic")
             return
 
@@ -263,19 +321,17 @@ class AsyncImage(Gtk.Image):
         if cached_pixbuf:
             IMG_CACHE.move_to_end(url)
         else:
-            # Only show placeholder if we don't already have a valid image.
-            # This prevents "flicker" when updating covers.
-            if not self.get_paintable() or self._is_placeholder:
+            # Only show placeholder if we don't already have a valid image
+            # and no local cover is loading
+            if not local and (not self.get_paintable() or self._is_placeholder):
                 self.set_from_icon_name("image-missing-symbolic")
                 self._is_placeholder = True
 
         fallbacks = kwargs.get("fallbacks") or get_ytimg_fallbacks(url)
-        # Prioritize the clean fallback versions.
-        # If url (clean) is different from orig_url (constrained),
-        # add orig_url to the END of the fallback list as a last resort.
         if url != orig_url and orig_url not in fallbacks:
             fallbacks.append(orig_url)
 
+        self.url = url  # Update so _apply_pixbuf accepts the web result
         thread = threading.Thread(
             target=self._fetch_image, args=(url, fallbacks, cached_pixbuf)
         )
@@ -286,21 +342,28 @@ class AsyncImage(Gtk.Image):
         try:
             pixbuf = cached_pixbuf
             if not pixbuf:
-                # Download image data
-                headers = {"User-Agent": "Mozilla/5.0"}
-                if self.player and hasattr(self.player, "client"):
-                    client = self.player.client
-                    if client and client.is_authenticated():
-                        # Use cookies for YouTube related domains to support private covers
-                        if any(d in url for d in ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"]):
-                            cookie = client.api.headers.get("Cookie")
-                            if cookie:
-                                headers["Cookie"] = cookie
+                if url.startswith("file://"):
+                    import os
+                    path = url[7:]
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            data = f.read()
+                    else:
+                        return
+                else:
+                    headers = {"User-Agent": "Mozilla/5.0"}
+                    if self.player and hasattr(self.player, "client"):
+                        client = self.player.client
+                        if client and client.is_authenticated():
+                            if any(d in url for d in ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"]):
+                                cookie = client.api.headers.get("Cookie")
+                                if cookie:
+                                    headers["Cookie"] = cookie
 
-                import requests
-                resp = requests.get(url, headers=headers, timeout=10)
-                resp.raise_for_status()
-                data = resp.content
+                    import requests
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    resp.raise_for_status()
+                    data = resp.content
 
                 loader = GdkPixbuf.PixbufLoader()
                 loader.write(data)
@@ -439,6 +502,7 @@ class AsyncPicture(Gtk.Picture):
         self.crop_to_square = crop_to_square
         self.target_size = target_size
         self.url = url
+        self.video_id = None
         self._is_placeholder = True
 
         # Constrain the picture widget to target_size so it doesn't
@@ -467,6 +531,29 @@ class AsyncPicture(Gtk.Picture):
             natural = size
             minimum = min(minimum, size)
         return minimum, natural, -1, -1
+
+    def _get_local_cover(self):
+        """Extract cover from downloaded audio file for offline display."""
+        if not self.video_id:
+            return None
+        try:
+            from player.downloads import get_download_db, DownloadManager
+            db = get_download_db()
+            audio_path = db.get_local_path(self.video_id)
+            if audio_path:
+                cover_data = DownloadManager.extract_cover_from_file(audio_path)
+                if cover_data:
+                    # Save to a temp file for GStreamer/GTK to load
+                    cache_dir = os.path.join(GLib.get_user_cache_dir(), "muse", "covers")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cover_path = os.path.join(cache_dir, f"{self.video_id}.jpg")
+                    if not os.path.exists(cover_path):
+                        with open(cover_path, "wb") as f:
+                            f.write(cover_data)
+                    return f"file://{cover_path}"
+        except Exception:
+            pass
+        return None
 
     def set_compact(self, compact):
         """Switch between desktop and mobile sizing."""
@@ -498,7 +585,30 @@ class AsyncPicture(Gtk.Picture):
         orig_url = url
         url = get_high_res_url(url, self.target_size)
         self.url = url
+
+        target_size = self.target_size
+        crop = self.crop_to_square
+
+        # Always try local cover first for instant display
+        local = self._get_local_cover() if self.video_id else None
+        if local and local in IMG_CACHE:
+            self.url = local
+            self._apply_pixbuf(IMG_CACHE[local], local)
+            IMG_CACHE.move_to_end(local)
+            if not is_online():
+                return
+        elif local:
+            self.url = local
+            threading.Thread(
+                target=self._fetch_image, args=(local, target_size, crop, []),
+                daemon=True,
+            ).start()
+            if not is_online():
+                return
+
         if not url:
+            if local:
+                return  # local cover thread already started
             self.set_paintable(None)
             return
 
@@ -507,24 +617,17 @@ class AsyncPicture(Gtk.Picture):
             pixbuf = IMG_CACHE[url]
             GLib.idle_add(self._apply_pixbuf, pixbuf, url)
             return
-        
-        # Only show placeholder if we don't already have one.
-        # This prevents flickering during cover updates.
-        if not self.get_paintable() or self._is_placeholder:
-            # We must NOT call get_icon_name() here as it leads to AttributeError on Gtk.Picture
+
+        # Only show placeholder if no local cover is loading
+        if not local and (not self.get_paintable() or self._is_placeholder):
             self.set_from_icon_name("image-missing-symbolic")
             self._is_placeholder = True
 
         fallbacks = kwargs.get("fallbacks") or get_ytimg_fallbacks(url)
-        # Prioritize the clean fallback versions.
-        # If url (clean) is different from orig_url (constrained),
-        # add orig_url to the END of the fallback list as a last resort.
         if url != orig_url and orig_url not in fallbacks:
             fallbacks.append(orig_url)
 
-        target_size = self.target_size
-        crop = self.crop_to_square
-
+        self.url = url  # Update so _apply_pixbuf accepts the web result
         threading.Thread(
             target=self._fetch_image,
             args=(url, target_size, crop, fallbacks),
@@ -533,21 +636,30 @@ class AsyncPicture(Gtk.Picture):
 
     def _fetch_image(self, url, target_size=None, crop=False, fallbacks=None):
         try:
-            # Download image data
-            headers = {"User-Agent": "Mozilla/5.0"}
-            if self.player and hasattr(self.player, "client"):
-                client = self.player.client
-                if client and client.is_authenticated():
-                    # Use cookies for YouTube related domains to support private covers
-                    if any(d in url for d in ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"]):
-                        cookie = client.api.headers.get("Cookie")
-                        if cookie:
-                            headers["Cookie"] = cookie
+            if url.startswith("file://"):
+                # Local file
+                import os
+                path = url[7:]
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        data = f.read()
+                else:
+                    return
+            else:
+                # Download image data
+                headers = {"User-Agent": "Mozilla/5.0"}
+                if self.player and hasattr(self.player, "client"):
+                    client = self.player.client
+                    if client and client.is_authenticated():
+                        if any(d in url for d in ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"]):
+                            cookie = client.api.headers.get("Cookie")
+                            if cookie:
+                                headers["Cookie"] = cookie
 
-            import requests
-            resp = requests.get(url, headers=headers, timeout=10)
-            resp.raise_for_status()
-            data = resp.content
+                import requests
+                resp = requests.get(url, headers=headers, timeout=10)
+                resp.raise_for_status()
+                data = resp.content
 
             loader = GdkPixbuf.PixbufLoader()
             loader.write(data)
@@ -593,9 +705,13 @@ class AsyncPicture(Gtk.Picture):
                 self.url = next_url
                 self._fetch_image(next_url, target_size, crop, fallbacks)
             else:
-                # Silently fail for list items to avoid spamming console
-                # but keep error for single loads
-                pass
+                # Last resort: try local cover for downloaded songs
+                try:
+                    local = self._get_local_cover()
+                    if local and local != url:
+                        self._fetch_image(local, target_size, crop, [])
+                except Exception:
+                    pass
 
     def _apply_pixbuf(self, pixbuf, url=None):
         # Race condition check

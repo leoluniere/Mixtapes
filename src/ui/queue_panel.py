@@ -176,21 +176,21 @@ class QueuePanel(Gtk.Box):
         self.header_bar.add_css_class("flat")
         self.header_bar.set_show_end_title_buttons(False)
         self.header_bar.set_show_start_title_buttons(False)
-        
+
         # Title/Subtitle in HeaderBar
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         title_box.set_valign(Gtk.Align.CENTER)
-        
+
         self.title_label = Gtk.Label(label="Queue")
         self.title_label.add_css_class("sidebar-title")
         self.title_label.set_halign(Gtk.Align.CENTER)
-        
+
         self.count_label = Gtk.Label(label="0 tracks")
         self.count_label.add_css_class("caption-2")
         self.count_label.add_css_class("dim-label")
         self.count_label.set_halign(Gtk.Align.CENTER)
         self.count_label.set_opacity(0.6)
-        
+
         title_box.append(self.title_label)
         title_box.append(self.count_label)
         self.header_bar.set_title_widget(title_box)
@@ -215,7 +215,9 @@ class QueuePanel(Gtk.Box):
         # More Menu
         self.action_group = Gio.SimpleActionGroup()
         self.insert_action_group("queue", self.action_group)
-        action_add = Gio.SimpleAction.new("add_all_to_playlist", GLib.VariantType.new("s"))
+        action_add = Gio.SimpleAction.new(
+            "add_all_to_playlist", GLib.VariantType.new("s")
+        )
         action_add.connect("activate", self._on_add_all_to_playlist)
         self.action_group.add_action(action_add)
 
@@ -223,15 +225,13 @@ class QueuePanel(Gtk.Box):
         self.more_btn.set_tooltip_text("More Options")
         self.more_menu_model = Gio.Menu()
         self.playlist_menu = Gio.Menu()
-        self.more_menu_model.append_submenu("Add all to Playlist", self.playlist_menu)
         self.more_btn.set_menu_model(self.more_menu_model)
         self.header_bar.pack_end(self.more_btn)
 
         self.toolbar_view.add_top_bar(self.header_bar)
         self.append(self.toolbar_view)
 
-
-        # ListView Setup — use NoSelection to avoid selection-changed race conditions.
+        # ListView Setup - use NoSelection to avoid selection-changed race conditions.
         # User clicks are handled via explicit gesture in factory setup.
         self.store = Gio.ListStore(item_type=QueueItem)
         self.selection_model = Gtk.NoSelection(model=self.store)
@@ -259,13 +259,18 @@ class QueuePanel(Gtk.Box):
 
     def _refresh_playlists_menu(self):
         self.playlist_menu.remove_all()
+        self.more_menu_model.remove_all()
+        from ui.utils import is_online
+
+        if not is_online():
+            return
         playlists = self.player.client.get_editable_playlists()
         for p in playlists:
             title = p.get("title", "Untitled")
             pid = p.get("playlistId")
             if pid:
-                # Use a specific action name that includes the playlist ID
                 self.playlist_menu.append(title, f"queue.add_all_to_playlist('{pid}')")
+        self.more_menu_model.append_submenu("Add all to Playlist", self.playlist_menu)
 
     def _on_add_all_to_playlist(self, action, param):
         playlist_id = param.get_string()
@@ -371,7 +376,10 @@ class QueuePanel(Gtk.Box):
 
         # Long press for touch
         lp = Gtk.GestureLongPress()
-        lp.connect("pressed", lambda g, x, y, li=list_item: self._on_row_right_click(g, 1, x, y, li))
+        lp.connect(
+            "pressed",
+            lambda g, x, y, li=list_item: self._on_row_right_click(g, 1, x, y, li),
+        )
         widget.add_controller(lp)
 
     def _on_factory_bind(self, factory, list_item):
@@ -399,56 +407,76 @@ class QueuePanel(Gtk.Box):
 
         menu = Gio.Menu()
 
+        from ui.utils import is_online
+
+        _online = is_online()
+
         # Actions section
         action_section = Gio.Menu()
 
-        # Start Radio
-        if vid:
+        # Start Radio (online only)
+        if vid and _online:
             action_section.append("Start Radio", "q.start_radio")
             a_radio = Gio.SimpleAction.new("start_radio", None)
-            a_radio.connect("activate", lambda a, p, v=vid: self.player.start_radio(video_id=v))
+            a_radio.connect(
+                "activate", lambda a, p, v=vid: self.player.start_radio(video_id=v)
+            )
             group.add_action(a_radio)
 
-        # Add to Playlist
-        if vid:
+        # Add to Playlist (online only)
+        if vid and _online:
             playlists = self.player.client.get_editable_playlists()
             if playlists:
                 playlist_menu = Gio.Menu()
                 for pl in sorted(playlists, key=lambda x: x.get("title", "").lower()):
                     pid = pl.get("playlistId")
                     if pid:
-                        playlist_menu.append(pl.get("title", "?"), f"q.add_to_playlist('{pid}')")
+                        playlist_menu.append(
+                            pl.get("title", "?"), f"q.add_to_playlist('{pid}')"
+                        )
                 action_section.append_submenu("Add to Playlist", playlist_menu)
 
-                a_add = Gio.SimpleAction.new("add_to_playlist", GLib.VariantType.new("s"))
+                a_add = Gio.SimpleAction.new(
+                    "add_to_playlist", GLib.VariantType.new("s")
+                )
+
                 def _do_add(act, param, v=vid):
                     target_pid = param.get_string()
+
                     def _thread():
                         success = self.player.client.add_playlist_items(target_pid, [v])
                         if success:
                             GLib.idle_add(self._show_toast, "Added to playlist")
                         else:
                             GLib.idle_add(self._show_toast, "Failed to add")
+
                     threading.Thread(target=_thread, daemon=True).start()
+
                 a_add.connect("activate", _do_add)
                 group.add_action(a_add)
 
         # Remove from Queue
         action_section.append("Remove from Queue", "q.remove")
         a_remove = Gio.SimpleAction.new("remove", None)
-        a_remove.connect("activate", lambda a, p, i=idx: self.player.remove_from_queue(i))
+        a_remove.connect(
+            "activate", lambda a, p, i=idx: self.player.remove_from_queue(i)
+        )
         group.add_action(a_remove)
 
         menu.append_section(None, action_section)
 
-        # Clipboard section
-        if vid:
+        # Clipboard section (online only)
+        if vid and _online:
             clip_section = Gio.Menu()
             clip_section.append("Copy Link", "q.copy_link")
             a_copy = Gio.SimpleAction.new("copy_link", None)
+
             def _copy_link(a, p, v=vid):
-                Gdk.Display.get_default().get_clipboard().set(f"https://music.youtube.com/watch?v={v}")
+                Gdk.Display.get_default().get_clipboard().set(
+                    f"https://music.youtube.com/watch?v={v}"
+                )
                 self._show_toast("Link copied")
+
             a_copy.connect("activate", _copy_link)
             group.add_action(a_copy)
             menu.append_section(None, clip_section)
@@ -516,4 +544,4 @@ class QueuePanel(Gtk.Box):
         if hasattr(root, "toggle_queue"):
             # If we are clearing, we might want to hide it
             if not self.player.queue:
-                 root.toggle_queue()
+                root.toggle_queue()

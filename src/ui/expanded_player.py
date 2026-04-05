@@ -28,7 +28,7 @@ class ExpandedPlayer(Gtk.Box):
 
         self.view_stack = Adw.ViewStack()
         self.view_stack.set_vexpand(True)
-        # Adw.ViewStack doesn't support transition types in all versions, 
+        # Adw.ViewStack doesn't support transition types in all versions,
         # and it's handled by libadwaita's animation system.
 
         self.switcher_title = Adw.ViewSwitcherTitle()
@@ -51,7 +51,6 @@ class ExpandedPlayer(Gtk.Box):
         self.player_scroll = Gtk.ScrolledWindow()
         self.player_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.player_scroll.set_propagate_natural_height(True)
-
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         main_box.set_margin_top(12)
@@ -149,6 +148,10 @@ class ExpandedPlayer(Gtk.Box):
         a_copy.connect("activate", self._on_copy_link)
         self.ep_action_group.add_action(a_copy)
 
+        a_dl = Gio.SimpleAction.new("download", None)
+        a_dl.connect("activate", self._on_download)
+        self.ep_action_group.add_action(a_dl)
+
         meta_row.append(text_box)
         meta_row.append(self.like_btn)
         main_box.append(meta_row)
@@ -206,7 +209,7 @@ class ExpandedPlayer(Gtk.Box):
         self.vol_popover_box.set_margin_bottom(12)
         self.vol_popover_box.set_margin_start(8)
         self.vol_popover_box.set_margin_end(8)
-        
+
         self.volume_scale = Gtk.Scale(orientation=Gtk.Orientation.VERTICAL)
         self.volume_scale.set_range(0, 1.0)
         self.volume_scale.set_inverted(True)
@@ -274,11 +277,11 @@ class ExpandedPlayer(Gtk.Box):
 
         self.queue_panel = QueuePanel(self.player)
         self.queue_panel.set_vexpand(True)
-        
+
         # Remove the internal header of QueuePanel since it already has one,
         # or maybe we want a dedicated header here?
         # Let's keep it simple for now.
-        
+
         queue_box.append(self.queue_panel)
         self.view_stack.add_titled_with_icon(
             queue_box, "queue", "Queue", "music-queue-symbolic"
@@ -301,14 +304,16 @@ class ExpandedPlayer(Gtk.Box):
         self.switcher.set_visible(compact)
         if not compact:
             self.view_stack.set_visible_child_name("player")
-            self.set_margin_top(12) # Less padding on desktop
+            self.set_margin_top(12)  # Less padding on desktop
         else:
             self.set_margin_top(32)
 
     def _on_map(self, widget):
         GLib.idle_add(self._center_carousel)
         # Sync like status from current queue track (may have been missed before map)
-        if self.player.current_video_id and 0 <= self.player.current_queue_index < len(self.player.queue):
+        if self.player.current_video_id and 0 <= self.player.current_queue_index < len(
+            self.player.queue
+        ):
             track = self.player.queue[self.player.current_queue_index]
             like_status = track.get("likeStatus", "INDIFFERENT")
             self.like_btn.set_data(self.player.current_video_id, like_status)
@@ -479,7 +484,7 @@ class ExpandedPlayer(Gtk.Box):
             return
 
         if state == "playing" and self.player.duration <= 0:
-            # We are playing but buffering stream—keep spinner active until duration > 0
+            # We are playing but buffering stream-keep spinner active until duration > 0
             self.play_btn_stack.set_visible_child_name("spinner")
             self.play_btn.set_sensitive(False)
             self._is_buffering_spinner = True
@@ -490,7 +495,7 @@ class ExpandedPlayer(Gtk.Box):
             and self.player.duration <= 0
             and state in ("paused", "stopped")
         ):
-            # Still buffering—keep spinner visible
+            # Still buffering-keep spinner visible
             return
 
         self._is_buffering_spinner = False
@@ -504,7 +509,7 @@ class ExpandedPlayer(Gtk.Box):
         self.play_icon.set_from_icon_name(icon)
 
     def on_volume_scale_changed(self, scale):
-        if getattr(self, '_updating_volume', False):
+        if getattr(self, "_updating_volume", False):
             return
         self.player.set_volume(scale.get_value())
 
@@ -558,26 +563,36 @@ class ExpandedPlayer(Gtk.Box):
 
         action_section = Gio.Menu()
 
-        # Start Radio
-        if vid:
+        from ui.utils import is_online
+
+        _online = is_online()
+
+        # Start Radio (online only)
+        if vid and _online:
             action_section.append("Start Radio", "ep.start_radio")
 
-        # Add to Playlist
-        if vid:
+        # Add to Playlist (online only)
+        if vid and _online:
             playlists = self.player.client.get_editable_playlists()
             if playlists:
                 playlist_menu = Gio.Menu()
                 for p in sorted(playlists, key=lambda x: x.get("title", "").lower()):
                     pid = p.get("playlistId")
                     if pid:
-                        playlist_menu.append(p.get("title", "?"), f"ep.add_to_playlist('{pid}')")
+                        playlist_menu.append(
+                            p.get("title", "?"), f"ep.add_to_playlist('{pid}')"
+                        )
                 action_section.append_submenu("Add to Playlist", playlist_menu)
+
+        # Download (online only)
+        if vid and _online and not self.player.download_manager.is_downloaded(vid):
+            action_section.append("Download", "ep.download")
 
         if action_section.get_n_items() > 0:
             self.more_menu_model.append_section(None, action_section)
 
-        # Clipboard
-        if vid:
+        # Clipboard (online only)
+        if vid and _online:
             clip_section = Gio.Menu()
             clip_section.append("Copy Song Link", "ep.copy_link")
             self.more_menu_model.append_section(None, clip_section)
@@ -599,6 +614,14 @@ class ExpandedPlayer(Gtk.Box):
         vid = self.player.current_video_id
         if vid:
             self.player.start_radio(video_id=vid)
+
+    def _on_download(self, action, param):
+        idx = self.player.current_queue_index
+        if 0 <= idx < len(self.player.queue):
+            track = self.player.queue[idx]
+            root = self.get_root()
+            if root and hasattr(root, "download_track"):
+                root.download_track(track)
 
     def _on_copy_link(self, action, param):
         vid = self.player.current_video_id

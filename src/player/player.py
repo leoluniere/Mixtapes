@@ -12,6 +12,7 @@ from mprisify.server import Server
 from ui.utils import get_high_res_url, get_ytimg_fallbacks
 from player.mpris import MuseMprisAdapter, MuseEventAdapter
 from player.cache import StreamCache
+from player.downloads import DownloadManager
 from api.client import MusicClient
 
 
@@ -102,6 +103,9 @@ class Player(GObject.Object):
 
         # Audio snippet cache
         self.stream_cache = StreamCache()
+
+        # Download manager for offline playback
+        self.download_manager = DownloadManager(self.client)
         self._playing_from_cache = False
         self._pending_stream_url = None
 
@@ -169,6 +173,7 @@ class Player(GObject.Object):
 
     def start_radio(self, video_id=None, playlist_id=None):
         """Start a radio (mix) from a song or playlist. Runs in background."""
+
         def _fetch():
             try:
                 data = self.client.get_watch_playlist(
@@ -186,9 +191,7 @@ class Player(GObject.Object):
                                 t["thumb"] = thumbs[-1].get("url", "")
 
                     pid = data.get("playlistId")
-                    GObject.idle_add(
-                        self.set_queue, tracks, 0, False, pid, True
-                    )
+                    GObject.idle_add(self.set_queue, tracks, 0, False, pid, True)
                 else:
                     print("[RADIO] No tracks returned")
             except Exception as e:
@@ -508,7 +511,14 @@ class Player(GObject.Object):
             except Exception as e:
                 print(f"mpris ERROR: {e}")
 
-        # Check stream URL cache — skip yt-dlp if we have a valid cached URL
+        # Check for local download - instant offline playback, skip yt-dlp entirely
+        local_path = self.download_manager.get_local_path(video_id)
+        if local_path:
+            print(f"[OFFLINE] Playing local file: {local_path}")
+            GLib.idle_add(self._start_playback, f"file://{local_path}")
+            return
+
+        # Check stream URL cache - skip yt-dlp if we have a valid cached URL
         self._playing_from_cache = False
         self._pending_stream_url = None
         self._waiting_for_stream = False
@@ -807,8 +817,8 @@ class Player(GObject.Object):
                 # Cache the stream URL for future plays
                 self.stream_cache.put(video_id, stream_url)
 
-                if getattr(self, '_cache_failed_waiting', False):
-                    # Cached URL failed earlier, yt-dlp just finished — play now
+                if getattr(self, "_cache_failed_waiting", False):
+                    # Cached URL failed earlier, yt-dlp just finished - play now
                     print("[CACHE] yt-dlp finished, playing after cache failure")
                     self._cache_failed_waiting = False
                     GObject.idle_add(self._start_playback, stream_url)
@@ -951,7 +961,7 @@ class Player(GObject.Object):
 
             # If cached URL failed, try the fresh yt-dlp resolved URL
             if self._used_cached_url:
-                fallback = getattr(self, '_fallback_stream_url', None)
+                fallback = getattr(self, "_fallback_stream_url", None)
                 self._used_cached_url = False
                 if fallback:
                     print("[CACHE] Cached URL failed, using fresh URL")
@@ -961,7 +971,7 @@ class Player(GObject.Object):
                     self._start_playback(fallback)
                     return
                 else:
-                    # yt-dlp hasn't finished yet — flag so it plays when ready
+                    # yt-dlp hasn't finished yet - flag so it plays when ready
                     print("[CACHE] Cached URL failed, waiting for yt-dlp...")
                     self._cache_failed_waiting = True
                     self.player.set_state(Gst.State.NULL)
@@ -976,7 +986,7 @@ class Player(GObject.Object):
                 if new == Gst.State.PLAYING:
                     self._is_loading = False
                 self._update_logical_state()
-        # BUFFERING messages are intentionally ignored — playbin manages
+        # BUFFERING messages are intentionally ignored - playbin manages
         # stream buffering internally and briefly pauses the pipeline,
         # which would cause the spinner to flash unnecessarily.
 
@@ -986,6 +996,18 @@ class Player(GObject.Object):
 
     def _sync_mpris_art(self, url, video_id):
         """Downloads, crops, and saves artwork locally for MPRIS with fallback support."""
+        # Try local cover first (works offline)
+        if video_id:
+            local_path = self.download_manager.get_local_path(video_id)
+            if local_path:
+                import os as _os
+
+                cover = _os.path.join(_os.path.dirname(local_path), "cover.jpg")
+                if _os.path.exists(cover):
+                    self.mpris_art_url = f"file://{cover}"
+                    if hasattr(self, "mpris_events"):
+                        self.mpris_events.on_title()
+                    return
         if not url:
             return
 
@@ -1009,12 +1031,21 @@ class Player(GObject.Object):
                 }
                 if self.client and self.client.is_authenticated():
                     # Use cookies for YouTube related domains to support private covers
-                    if any(d in fetch_url for d in ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"]):
+                    if any(
+                        d in fetch_url
+                        for d in [
+                            "youtube.com",
+                            "ytimg.com",
+                            "googleusercontent.com",
+                            "ggpht.com",
+                        ]
+                    ):
                         cookie = self.client.api.headers.get("Cookie")
                         if cookie:
                             headers["Cookie"] = cookie
 
                 import requests
+
                 resp = requests.get(fetch_url, headers=headers, timeout=10)
                 resp.raise_for_status()
                 data = resp.content

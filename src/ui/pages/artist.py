@@ -229,10 +229,22 @@ class ArtistPage(Adw.Bin):
             # Fetch missing sections (playlists, featured on, live) from raw API
             if self._artist_data and not self._artist_data.get("_is_channel"):
                 try:
-                    raw = self.client.api._send_request("browse", {"browseId": channel_id})
-                    tabs = raw.get("contents", {}).get("singleColumnBrowseResultsRenderer", {}).get("tabs", [])
+                    raw = self.client.api._send_request(
+                        "browse", {"browseId": channel_id}
+                    )
+                    tabs = (
+                        raw.get("contents", {})
+                        .get("singleColumnBrowseResultsRenderer", {})
+                        .get("tabs", [])
+                    )
                     if tabs:
-                        sections = tabs[0].get("tabRenderer", {}).get("content", {}).get("sectionListRenderer", {}).get("contents", [])
+                        sections = (
+                            tabs[0]
+                            .get("tabRenderer", {})
+                            .get("content", {})
+                            .get("sectionListRenderer", {})
+                            .get("contents", [])
+                        )
                         for section in sections:
                             for rkey in ["musicCarouselShelfRenderer"]:
                                 r = section.get(rkey, {})
@@ -248,15 +260,26 @@ class ArtistPage(Adw.Bin):
                                         if runs:
                                             title = runs[0].get("text", "")
                                         # Get browse endpoint for "View All"
-                                        more_ep = hr.get("moreContentButton", {}).get("buttonRenderer", {}).get("navigationEndpoint", {}).get("browseEndpoint", {})
+                                        more_ep = (
+                                            hr.get("moreContentButton", {})
+                                            .get("buttonRenderer", {})
+                                            .get("navigationEndpoint", {})
+                                            .get("browseEndpoint", {})
+                                        )
                                         if more_ep.get("browseId"):
                                             browse_id = more_ep["browseId"]
                                             params = more_ep.get("params")
                                 # Add sections that ytmusicapi misses
-                                if title and "playlist" in title.lower() and "playlists" not in self._artist_data:
+                                if (
+                                    title
+                                    and "playlist" in title.lower()
+                                    and "playlists" not in self._artist_data
+                                ):
                                     items = []
                                     for raw_item in r.get("contents", []):
-                                        parsed = self.client._parse_channel_item(raw_item)
+                                        parsed = self.client._parse_channel_item(
+                                            raw_item
+                                        )
                                         if parsed:
                                             items.append(parsed)
                                     if items:
@@ -265,10 +288,16 @@ class ArtistPage(Adw.Bin):
                                             "browseId": browse_id,
                                             "params": params,
                                         }
-                                elif title and "featured" in title.lower() and "featured_on" not in self._artist_data:
+                                elif (
+                                    title
+                                    and "featured" in title.lower()
+                                    and "featured_on" not in self._artist_data
+                                ):
                                     items = []
                                     for raw_item in r.get("contents", []):
-                                        parsed = self.client._parse_channel_item(raw_item)
+                                        parsed = self.client._parse_channel_item(
+                                            raw_item
+                                        )
                                         if parsed:
                                             items.append(parsed)
                                     if items:
@@ -517,7 +546,7 @@ class ArtistPage(Adw.Bin):
             img.video_id = item.get("videoId")
             img.add_css_class("song-img")
             root = self.get_root()
-            img.set_compact(getattr(root, '_is_compact', False) if root else False)
+            img.set_compact(getattr(root, "_is_compact", False) if root else False)
             box.append(img)
 
             song_title = item.get("title", "Unknown")
@@ -712,6 +741,7 @@ class ArtistPage(Adw.Bin):
         box.append(label)
 
         from ui.widgets.scroll_box import HorizontalScrollBox
+
         scrolled = HorizontalScrollBox()
 
         inner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
@@ -828,8 +858,13 @@ class ArtistPage(Adw.Bin):
             more_btn.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
 
             # Click handler for Load More using the button directly
-            more_btn.connect("clicked", lambda btn, t=title, sd=section_dict: self.on_load_more_clicked(btn, t, sd, None, btn))
-            
+            more_btn.connect(
+                "clicked",
+                lambda btn, t=title, sd=section_dict: self.on_load_more_clicked(
+                    btn, t, sd, None, btn
+                ),
+            )
+
             load_more_cell.append(more_btn)
             inner_box.append(load_more_cell)
 
@@ -874,7 +909,7 @@ class ArtistPage(Adw.Bin):
             browse_id = section_dict.get("browseId")
 
             if not browse_id:
-                # No browseId — show all results inline
+                # No browseId - show all results inline
                 self._section_limits[title] = len(results)
                 self.update_ui(self._artist_data)
                 return
@@ -1179,7 +1214,7 @@ class ArtistPage(Adw.Bin):
             if "videoId" in data:
                 self.player.play_tracks([data])
             elif pid and pid.startswith("UC"):
-                # Artist browse ID — open artist page
+                # Artist browse ID - open artist page
                 root = self.get_root()
                 if root and hasattr(root, "open_artist"):
                     root.open_artist(pid, data.get("title"))
@@ -1233,7 +1268,7 @@ class ArtistPage(Adw.Bin):
             self.player.set_queue(self._build_queue_tracks(), -1, shuffle=True)
 
     def on_radio_clicked(self, btn):
-        radio_id = getattr(self, '_radio_id', None)
+        radio_id = getattr(self, "_radio_id", None)
         if radio_id:
             self.player.start_radio(playlist_id=radio_id)
         elif hasattr(self, "current_songs") and self.current_songs:
@@ -1295,9 +1330,9 @@ class ArtistPage(Adw.Bin):
         popover.popup()
 
     def _propagate_compact(self, widget, compact):
-        if hasattr(widget, 'set_compact') and hasattr(widget, 'target_size'):
+        if hasattr(widget, "set_compact") and hasattr(widget, "target_size"):
             widget.set_compact(compact)
-        child = widget.get_first_child() if hasattr(widget, 'get_first_child') else None
+        child = widget.get_first_child() if hasattr(widget, "get_first_child") else None
         while child:
             self._propagate_compact(child, compact)
             child = child.get_next_sibling()

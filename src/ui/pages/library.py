@@ -1,3 +1,4 @@
+import os
 from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio, Pango
 import threading
 from api.client import MusicClient
@@ -53,6 +54,19 @@ class LibraryPage(Adw.Bin):
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         tab_row.append(spacer)
+
+        # Library action buttons (only visible on library tab)
+        self.lib_actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+        self.downloads_btn = Gtk.Button(icon_name="folder-download-symbolic")
+        self.downloads_btn.add_css_class("flat")
+        self.downloads_btn.add_css_class("circular")
+        self.downloads_btn.set_valign(Gtk.Align.CENTER)
+        self.downloads_btn.set_tooltip_text("Downloaded Songs")
+        self.downloads_btn.connect("clicked", lambda b: self._open_downloads_page())
+        self.lib_actions_box.append(self.downloads_btn)
+
+        tab_row.append(self.lib_actions_box)
 
         # Upload action buttons (only visible on uploads tab)
         self.uploads_actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -251,6 +265,7 @@ class LibraryPage(Adw.Bin):
             GObject.idle_add(self.update_albums, albums if albums else [])
             GObject.idle_add(self.update_artists, artists if artists else [])
             GLib.idle_add(self.stack.set_visible_child_name, "root")
+            GLib.idle_add(self._apply_offline_state)
         finally:
             self._is_loading = False
 
@@ -285,6 +300,16 @@ class LibraryPage(Adw.Bin):
 
             thumbnails = p.get("thumbnails", [])
             thumb_url = thumbnails[-1]["url"] if thumbnails else None
+
+            # Use locally saved playlist cover when offline
+            from ui.utils import is_online
+            if not is_online():
+                from player.downloads import get_music_dir, _sanitize_filename
+                cover_path = os.path.join(
+                    get_music_dir(), "playlists", f"{_sanitize_filename(title)}.jpg"
+                )
+                if os.path.exists(cover_path):
+                    thumb_url = f"file://{cover_path}"
 
             processed_ids.add(p_id)
 
@@ -570,6 +595,73 @@ class LibraryPage(Adw.Bin):
         popover.set_pointing_to(rect)
         popover.popup()
 
+    def _open_downloads_page(self):
+        """Open a pseudo-playlist with all downloaded songs."""
+        nav = None
+        parent = self.get_parent()
+        while parent:
+            if isinstance(parent, Adw.NavigationView):
+                nav = parent
+                break
+            parent = parent.get_parent()
+        if not nav:
+            return
+
+        from ui.pages.playlist import PlaylistPage
+        page = PlaylistPage(self.player)
+        page.playlist_id = "DOWNLOADS"
+        page.is_fully_loaded = True
+        page.is_fully_fetched = True
+
+        root = self.get_root()
+        if root and getattr(root, '_is_compact', False):
+            page.set_compact_mode(True)
+
+        nav_page = Adw.NavigationPage(child=page, title="Downloaded Songs")
+        nav.push(nav_page)
+        page.stack.set_visible_child_name("loading")
+
+        def _fetch():
+            from player.downloads import get_download_db
+            db = get_download_db()
+            downloads = db.get_all_downloads()
+            tracks = []
+            for d in downloads:
+                t = {
+                    "videoId": d.get("video_id"),
+                    "title": d.get("title", "Unknown"),
+                    "artists": [{"name": d.get("artist", ""), "id": None}] if d.get("artist") else [],
+                    "album": {"name": d.get("album", "")},
+                    "duration_seconds": d.get("duration_seconds", 0),
+                    "thumbnails": [{"url": d.get("thumbnail_url")}] if d.get("thumbnail_url") else [],
+                }
+                dur = d.get("duration_seconds", 0)
+                if dur:
+                    t["duration"] = f"{dur // 60}:{dur % 60:02d}"
+                tracks.append(t)
+
+            GLib.idle_add(self._show_downloads_page, page, tracks)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _show_downloads_page(self, page, tracks):
+        page.original_tracks = tracks
+        page.current_tracks = tracks
+
+        total_seconds = sum(t.get("duration_seconds", 0) for t in tracks)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        dur = f"{hours} hr {minutes} min" if hours > 0 else f"{minutes} min"
+
+        page.update_ui(
+            title="Downloaded Songs",
+            description="",
+            meta1=f"{len(tracks)} songs available offline",
+            meta2=dur,
+            thumbnails=tracks[0].get("thumbnails", []) if tracks else [],
+            tracks=tracks,
+        )
+
     def _on_upload_clicked(self, btn):
         # Call uploads page but pass our root window since uploads tab might not be visible
         self.uploads_page._do_open_file_picker(self.get_root())
@@ -577,6 +669,7 @@ class LibraryPage(Adw.Bin):
     def _on_tab_changed(self, stack, param):
         is_uploads = stack.get_visible_child_name() == "uploads"
         self.uploads_actions_box.set_visible(is_uploads)
+        self.lib_actions_box.set_visible(not is_uploads)
         if is_uploads:
             # Refresh uploads every time the tab is revealed
             self.uploads_page.load()
@@ -871,6 +964,51 @@ class LibraryPage(Adw.Bin):
             if hasattr(root, "open_artist"):
                 root.open_artist(row.artist_id, row.artist_name)
 
+    def _apply_offline_state(self):
+        """Grey out items that are unavailable offline."""
+        from ui.utils import is_online
+        if is_online():
+            # Re-enable everything
+            for listbox in [self.playlists_list, self.albums_list, self.artists_list]:
+                row = listbox.get_row_at_index(0)
+                while row:
+                    row.set_sensitive(True)
+                    row.set_opacity(1.0)
+                    row = row.get_next_sibling()
+            return
+
+        from player.downloads import get_download_db
+        db = get_download_db()
+
+        # Grey out playlists without cached data
+        row = self.playlists_list.get_row_at_index(0)
+        while row:
+            pid = getattr(row, "playlist_id", None)
+            if pid:
+                cached = db.get_cached_playlist(pid)
+                has_data = cached and cached.get("tracks")
+                row.set_sensitive(bool(has_data))
+                row.set_opacity(1.0 if has_data else 0.4)
+            row = row.get_next_sibling()
+
+        # Grey out albums without cached data
+        row = self.albums_list.get_row_at_index(0)
+        while row:
+            bid = getattr(row, "album_id", None)
+            if bid:
+                cached = db.get_cached_playlist(bid)
+                has_data = cached and cached.get("tracks")
+                row.set_sensitive(bool(has_data))
+                row.set_opacity(1.0 if has_data else 0.4)
+            row = row.get_next_sibling()
+
+        # Grey out all artists when offline (can't load artist pages)
+        row = self.artists_list.get_row_at_index(0)
+        while row:
+            row.set_sensitive(False)
+            row.set_opacity(0.4)
+            row = row.get_next_sibling()
+
     def on_playlist_activated(self, box, row):
         if hasattr(row, "playlist_id"):
             initial_data = {
@@ -969,6 +1107,12 @@ class UploadsPage(Gtk.Box):
             child = child.get_next_sibling()
 
     def load(self):
+        from ui.utils import is_online
+        if not is_online():
+            self._stack.set_visible_child_name("content")
+            self.empty_label.set_label("Uploads require an internet connection")
+            self.empty_label.set_visible(True)
+            return
         # Only show loading screen if we have no content yet (first load)
         has_content = self.albums_list.get_row_at_index(0) is not None or self.artists_list.get_row_at_index(0) is not None
         if not has_content:

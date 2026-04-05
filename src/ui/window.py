@@ -5,7 +5,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk, Gdk, Adw, GObject, Gio, GLib
+from gi.repository import Gtk, Gdk, Adw, GObject, Gio, GLib, Pango
 from player.player import Player
 
 
@@ -18,7 +18,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._is_compact = False
 
         # Add custom icons path relative to current file or project root
-        
+
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         assets_path = os.path.join(project_root, "assets", "icons")
 
@@ -82,7 +82,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.header_bar.set_title_widget(self.title_bin)
 
         # Upload progress button (pie chart, hidden by default)
-        self._upload_progress_btn = Gtk.MenuButton()
+        self._upload_progress_btn = Gtk.Button()
         self._upload_progress_btn.add_css_class("flat")
         self._upload_progress_btn.set_tooltip_text("Upload Progress")
         self._upload_progress_btn.set_visible(False)
@@ -92,23 +92,65 @@ class MainWindow(Adw.ApplicationWindow):
         self._pie_area.set_size_request(16, 16)
         self._pie_area.set_halign(Gtk.Align.CENTER)
         self._pie_area.set_valign(Gtk.Align.CENTER)
+        self._pie_area.set_can_target(False)
         self._pie_area.set_draw_func(self._draw_upload_pie)
         self._upload_progress_btn.set_child(self._pie_area)
 
-        upload_popover = Gtk.Popover()
-        upload_popover.set_size_request(300, -1)
+        self._ul_popover = Gtk.Popover()
+        self._ul_popover.set_size_request(300, -1)
+        self._ul_popover.set_parent(self._upload_progress_btn)
         popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         popover_box.set_margin_top(8)
         popover_box.set_margin_bottom(8)
         popover_box.set_margin_start(8)
         popover_box.set_margin_end(8)
-        self._upload_queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._upload_queue_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4
+        )
         popover_box.append(self._upload_queue_box)
-        upload_popover.set_child(popover_box)
-        self._upload_progress_btn.set_popover(upload_popover)
+        self._ul_popover.set_child(popover_box)
+        self._upload_progress_btn.connect("clicked", lambda b: self._ul_popover.popup())
+
+        # Download progress button (pie chart, hidden by default)
+        self._download_progress_btn = Gtk.Button()
+        self._download_progress_btn.add_css_class("flat")
+        self._download_progress_btn.set_tooltip_text("Download Progress")
+        self._download_progress_btn.set_visible(False)
+
+        self._download_progress_fraction = 0.0
+        self._dl_pie_area = Gtk.DrawingArea()
+        self._dl_pie_area.set_size_request(16, 16)
+        self._dl_pie_area.set_halign(Gtk.Align.CENTER)
+        self._dl_pie_area.set_valign(Gtk.Align.CENTER)
+        self._dl_pie_area.set_can_target(False)
+        self._dl_pie_area.set_draw_func(self._draw_download_pie)
+        self._download_progress_btn.set_child(self._dl_pie_area)
+
+        self._dl_popover = Gtk.Popover()
+        self._dl_popover.set_size_request(300, -1)
+        self._dl_popover.set_parent(self._download_progress_btn)
+        dl_scroll = Gtk.ScrolledWindow()
+        dl_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        dl_scroll.set_max_content_height(400)
+        dl_scroll.set_propagate_natural_height(True)
+        dl_popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        dl_popover_box.set_margin_top(8)
+        dl_popover_box.set_margin_bottom(8)
+        dl_popover_box.set_margin_start(8)
+        dl_popover_box.set_margin_end(8)
+        self._download_queue_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4
+        )
+        dl_popover_box.append(self._download_queue_box)
+        dl_scroll.set_child(dl_popover_box)
+        self._dl_popover.set_child(dl_scroll)
+        self._download_progress_btn.connect(
+            "clicked", lambda b: self._dl_popover.popup()
+        )
 
         self.header_bar.pack_end(menu_btn)
         self.header_bar.pack_end(self._upload_progress_btn)
+        self.header_bar.pack_end(self._download_progress_btn)
 
         # Search Button (Mobile/Contextual) - Toggle
         self.search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic")
@@ -150,7 +192,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Wrap content in OverlaySplitView for Sidebar (Nautilus-style)
         self.split_view = Adw.OverlaySplitView()
-        self.split_view.set_sidebar_position(Gtk.PackType.START) # Left side
+        self.split_view.set_sidebar_position(Gtk.PackType.START)  # Left side
         self.split_view.set_min_sidebar_width(250)
         self.split_view.set_max_sidebar_width(450)
 
@@ -173,16 +215,24 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.player = Player()
 
+        # Connect download manager progress to UI
+        self.player.download_manager.connect("progress", self._on_download_progress)
+        self.player.download_manager.connect("complete", self._on_download_complete)
+        self.player.download_manager.connect("item-done", self._on_download_item_done)
+        self.player.download_manager.connect(
+            "item-progress", self._on_download_item_progress
+        )
+
         self.queue_panel = QueuePanel(self.player)
 
         # Sidebar Content
         self.queue_panel.add_css_class("sidebar")
         self.split_view.set_sidebar(self.queue_panel)
-        
+
         # Set main_stack as content of root_content_view (ToolbarView)
         self.root_content_view.set_content(self.main_stack)
         self.split_view.set_content(self.root_content_view)
-        
+
         self._sidebar_explicitly_opened = False
         self.split_view.set_show_sidebar(False)  # Hidden by default
         self.split_view.set_enable_show_gesture(False)
@@ -197,7 +247,7 @@ class MainWindow(Adw.ApplicationWindow):
         # 5. Initialize BottomSheet
         self.bottom_sheet = Adw.BottomSheet()
         self.bottom_sheet.set_show_drag_handle(True)
-        self.bottom_sheet.set_open(False) # Ensure it's closed by default
+        self.bottom_sheet.set_open(False)  # Ensure it's closed by default
         self.bottom_sheet.set_content(self.split_view)
         # Mobile-only swipe? No, expanded player handles it.
 
@@ -268,14 +318,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.init_pages()
 
         # 6. Responsive Breakpoints
-        
+
         # COLLAPSE SIDERBAR (< 750px)
-        collapse_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 750px"))
+        collapse_breakpoint = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 750px")
+        )
         collapse_breakpoint.add_setter(self.split_view, "collapsed", True)
         self.add_breakpoint(collapse_breakpoint)
 
         # MOBILE UI (< 500px)
-        mobile_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 500px"))
+        mobile_breakpoint = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 500px")
+        )
         mobile_breakpoint.add_setter(self.view_switcher_bar, "reveal", True)
         mobile_breakpoint.add_setter(self.view_switcher_bar, "visible", True)
         mobile_breakpoint.connect("apply", self._on_mobile_breakpoint_apply)
@@ -284,6 +338,47 @@ class MainWindow(Adw.ApplicationWindow):
 
         # 7. Initial Checks
         self.check_auth()
+
+        # Monitor network connectivity
+        self._was_online = None
+        monitor = Gio.NetworkMonitor.get_default()
+        monitor.connect("network-changed", self._on_network_changed)
+
+    def _on_network_changed(self, monitor, available):
+        if available and self._was_online is False:
+            # Just came back online
+            print("[NETWORK] Back online - refreshing library")
+            self.add_toast("Back online")
+            if hasattr(self, "library_page"):
+                self.library_page.load_library()
+            if hasattr(self, "search_page"):
+                self.search_page.load_explore_data()
+            # Re-validate auth if needed
+            from api.client import MusicClient
+
+            client = MusicClient()
+            if not client.is_authenticated():
+                threading.Thread(target=self._revalidate_auth, daemon=True).start()
+        elif not available and self._was_online is not False:
+            print("[NETWORK] Went offline")
+            self.add_toast("Offline - downloaded songs still available")
+            # Grey out unavailable items
+            if hasattr(self, "library_page"):
+                self.library_page._apply_offline_state()
+            # Show offline message on explore
+            if hasattr(self, "search_page"):
+                self.search_page.load_explore_data()
+        self._was_online = available
+
+    def _revalidate_auth(self):
+        from api.client import MusicClient
+
+        client = MusicClient()
+        client.try_login()
+        if client.is_authenticated():
+            GLib.idle_add(self.add_toast, "Signed in")
+            if hasattr(self, "library_page"):
+                GLib.idle_add(self.library_page.load_library)
 
     def add_toast(self, message):
         toast = Adw.Toast.new(message)
@@ -321,7 +416,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_mobile_breakpoint_apply(self, breakpoint):
         self.add_css_class("compact")
-        was_expanded = (not self._is_compact and self.main_stack.get_visible_child_name() == "player")
+        was_expanded = (
+            not self._is_compact
+            and self.main_stack.get_visible_child_name() == "player"
+        )
         self._is_compact = True
         self.player_bar.set_compact(True)
         self.expanded_player.set_compact_mode(True)
@@ -332,14 +430,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Switch to Mobile Title
         if hasattr(self, "title_bin"):
             self.title_bin.set_child(self.title_widget)
-        
+
         if was_expanded:
             self.main_stack.set_visible_child_name("browser")
             self.bottom_sheet.set_open(True)
 
     def _on_mobile_breakpoint_unapply(self, breakpoint):
         self.remove_css_class("compact")
-        was_expanded = (self._is_compact and self.bottom_sheet.get_open())
+        was_expanded = self._is_compact and self.bottom_sheet.get_open()
         self._is_compact = False
         self.player_bar.set_compact(False)
         self.expanded_player.set_compact_mode(False)
@@ -354,7 +452,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Close the bottom sheet when returning to desktop size
         if hasattr(self, "bottom_sheet") and self.bottom_sheet.get_open():
             self.bottom_sheet.set_open(False)
-        
+
         if was_expanded:
             self.main_stack.set_visible_child_name("player")
             self.back_btn.set_visible(True)
@@ -408,7 +506,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def update_back_button_visibility(self, *args):
         # On desktop, if player is expanded, show back button
-        if not self._is_compact and self.main_stack.get_visible_child_name() == "player":
+        if (
+            not self._is_compact
+            and self.main_stack.get_visible_child_name() == "player"
+        ):
             self.back_btn.set_visible(True)
             return
 
@@ -432,7 +533,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.back_btn.set_visible(False)
 
     def on_back_clicked(self, btn):
-        if not self._is_compact and self.main_stack.get_visible_child_name() == "player":
+        if (
+            not self._is_compact
+            and self.main_stack.get_visible_child_name() == "player"
+        ):
             self._on_player_dismissed(None)
             return
 
@@ -448,6 +552,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _draw_upload_pie(self, area, cr, width, height):
         import math
+
         cx, cy = width / 2, height / 2
         radius = min(cx, cy) - 1
         frac = self._upload_progress_fraction
@@ -463,6 +568,146 @@ class MainWindow(Adw.ApplicationWindow):
         cr.fill()
 
         # Progress pie
+        if color[0]:
+            cr.set_source_rgba(color[1].red, color[1].green, color[1].blue, 1.0)
+        else:
+            cr.set_source_rgba(1, 1, 1, 1.0)
+        cr.move_to(cx, cy)
+        cr.arc(cx, cy, radius, -math.pi / 2, -math.pi / 2 + frac * 2 * math.pi)
+        cr.close_path()
+        cr.fill()
+
+    def download_tracks(self, tracks, album_title=None, album_id=None, thumb_url=None):
+        """Public API to queue tracks for download from anywhere in the app."""
+        dm = self.player.download_manager
+        dm.queue_tracks(tracks, album_title, album_id)
+
+        # Register playlist for incremental m3u8 generation
+        if album_title and tracks:
+            pl_thumb = thumb_url or (
+                tracks[0].get("thumbnails", [{}])[-1].get("url")
+                if tracks[0].get("thumbnails")
+                else None
+            )
+            dm.register_playlist(album_id, album_title, tracks, pl_thumb)
+
+        # Add items to the popover queue
+        for t in tracks:
+            vid = t.get("videoId")
+            if not vid or dm.db.is_downloaded(vid):
+                continue
+            title = t.get("title", "Unknown")
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            info.set_hexpand(True)
+            info.set_margin_top(4)
+            info.set_margin_bottom(4)
+            lbl = Gtk.Label(label=title)
+            lbl.set_halign(Gtk.Align.START)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.add_css_class("caption")
+            info.append(lbl)
+            status = Gtk.Label(label="Queued")
+            status.set_halign(Gtk.Align.START)
+            status.add_css_class("caption")
+            status.add_css_class("dim-label")
+            info.append(status)
+            progress = Gtk.ProgressBar()
+            progress.set_visible(False)
+            info.append(progress)
+            row.append(info)
+            row._video_id = vid
+            row._status_label = status
+            row._progress_bar = progress
+            self._download_queue_box.append(row)
+
+        self._download_progress_btn.set_visible(True)
+        dm.start()
+
+    def download_track(self, track, album_title=None, album_id=None):
+        """Download a single track."""
+        self.download_tracks([track], album_title, album_id)
+
+    def _on_download_progress(self, dm, done, total, current_title):
+        self._download_progress_fraction = done / max(total, 1)
+        self._dl_pie_area.queue_draw()
+
+        # Mark the current item as downloading
+        child = self._download_queue_box.get_first_child()
+        while child:
+            status = getattr(child, "_status_label", None)
+            bar = getattr(child, "_progress_bar", None)
+            if status and status.get_label() == "Queued":
+                status.set_label("Downloading...")
+                if bar:
+                    bar.set_visible(True)
+                    bar.set_fraction(0)
+                break
+            child = child.get_next_sibling()
+
+    def _on_download_item_progress(self, dm, video_id, fraction):
+        """Update per-item progress bar with actual download percentage."""
+        child = self._download_queue_box.get_first_child()
+        while child:
+            if getattr(child, "_video_id", None) == video_id:
+                bar = getattr(child, "_progress_bar", None)
+                status = getattr(child, "_status_label", None)
+                if bar:
+                    bar.set_visible(True)
+                    bar.set_fraction(fraction)
+                if status:
+                    status.set_label(f"{int(fraction * 100)}%")
+                break
+            child = child.get_next_sibling()
+
+    def _on_download_item_done(self, dm, video_id, success, message):
+        child = self._download_queue_box.get_first_child()
+        while child:
+            if getattr(child, "_video_id", None) == video_id:
+                if success:
+                    child._status_label.set_label("Done")
+                else:
+                    child._status_label.set_label("Failed")
+                bar = getattr(child, "_progress_bar", None)
+                if bar:
+                    if success:
+                        bar.set_fraction(1.0)
+                    bar.set_visible(False)
+                break
+            child = child.get_next_sibling()
+
+    def _on_download_complete(self, dm):
+        self.add_toast("Downloads complete")
+        # Clear done items after delay
+        GLib.timeout_add(5000, self._clear_download_queue)
+
+    def _clear_download_queue(self):
+        child = self._download_queue_box.get_first_child()
+        while child:
+            next_c = child.get_next_sibling()
+            self._download_queue_box.remove(child)
+            child = next_c
+        self._download_progress_btn.set_visible(False)
+        self._download_progress_fraction = 0.0
+        self._dl_pie_area.queue_draw()
+        return False
+
+    def _draw_download_pie(self, area, cr, width, height):
+        import math
+
+        cx, cy = width / 2, height / 2
+        radius = min(cx, cy) - 1
+        frac = self._download_progress_fraction
+
+        style = area.get_style_context()
+        color = style.lookup_color("theme_fg_color")
+        if color[0]:
+            cr.set_source_rgba(color[1].red, color[1].green, color[1].blue, 0.3)
+        else:
+            cr.set_source_rgba(1, 1, 1, 0.3)
+        cr.arc(cx, cy, radius, 0, 2 * math.pi)
+        cr.fill()
+
         if color[0]:
             cr.set_source_rgba(color[1].red, color[1].green, color[1].blue, 1.0)
         else:
@@ -539,7 +784,41 @@ class MainWindow(Adw.ApplicationWindow):
         )
         app_group.add(debug_row)
 
+        # Force offline mode
+        import json as _json
+
+        _prefs_path = os.path.join(GLib.get_user_data_dir(), "muse", "prefs.json")
+        _prefs = {}
+        try:
+            if os.path.exists(_prefs_path):
+                with open(_prefs_path) as f:
+                    _prefs = _json.load(f)
+        except Exception:
+            pass
+
+        offline_row = Adw.SwitchRow()
+        offline_row.set_title("Force Offline Mode")
+        offline_row.set_subtitle(
+            "Disable all network requests and use only downloaded content"
+        )
+        offline_row.set_active(_prefs.get("force_offline", False))
+
+        def on_offline_toggled(switch, pspec):
+            _prefs["force_offline"] = switch.get_active()
+            os.makedirs(os.path.dirname(_prefs_path), exist_ok=True)
+            with open(_prefs_path, "w") as f:
+                _json.dump(_prefs, f)
+            if hasattr(self, "library_page"):
+                self.library_page._apply_offline_state()
+                self.library_page.load_library()
+            if hasattr(self, "search_page"):
+                self.search_page.load_explore_data()
+
+        offline_row.connect("notify::active", on_offline_toggled)
+        app_group.add(offline_row)
+
         from api.client import MusicClient
+
         is_authed = MusicClient().is_authenticated()
 
         group = Adw.PreferencesGroup()
@@ -549,20 +828,65 @@ class MainWindow(Adw.ApplicationWindow):
         # Sign Out Row
         row = Adw.ActionRow()
         row.set_title("Sign Out" if is_authed else "Sign In")
-        row.set_subtitle("Remove saved credentials and log out of YouTube Music" if is_authed else "Sign in to YouTube Music to access your library")
+        row.set_subtitle(
+            "Remove saved credentials and log out of YouTube Music"
+            if is_authed
+            else "Sign in to YouTube Music to access your library"
+        )
 
         logout_btn = Gtk.Button(label="Sign Out" if is_authed else "Sign In")
         logout_btn.set_valign(Gtk.Align.CENTER)
-        
+
         if is_authed:
             logout_btn.add_css_class("destructive-action")
             logout_btn.connect("clicked", self.on_logout_clicked, prefs)
         else:
             logout_btn.add_css_class("suggested-action")
-            logout_btn.connect("clicked", lambda b, p: (p.close(), self.check_auth()), prefs)
+            logout_btn.connect(
+                "clicked", lambda b, p: (p.close(), self.check_auth()), prefs
+            )
 
         row.add_suffix(logout_btn)
         group.add(row)
+
+        # Downloads group
+        dl_group = Adw.PreferencesGroup()
+        dl_group.set_title("Downloads")
+        page.add(dl_group)
+
+        from player.downloads import (
+            get_preferred_format,
+            set_preferred_format,
+            FORMATS,
+            get_music_dir,
+        )
+
+        format_row = Adw.ComboRow()
+        format_row.set_title("Audio Format")
+        format_row.set_subtitle(f"Songs are saved to {get_music_dir()}")
+        format_names = list(FORMATS.keys())
+        format_labels = [
+            "Opus (smallest)",
+            "MP3 (universal)",
+            "M4A (Apple)",
+            "FLAC (lossless)",
+            "OGG (Vorbis)",
+        ]
+        format_row.set_model(Gtk.StringList.new(format_labels))
+
+        current_fmt = get_preferred_format()
+        for i, name in enumerate(format_names):
+            if name == current_fmt:
+                format_row.set_selected(i)
+                break
+
+        def on_format_changed(row, pspec):
+            idx = row.get_selected()
+            if 0 <= idx < len(format_names):
+                set_preferred_format(format_names[idx])
+
+        format_row.connect("notify::selected", on_format_changed)
+        dl_group.add(format_row)
 
         prefs.present(self)
 
@@ -648,6 +972,7 @@ class MainWindow(Adw.ApplicationWindow):
             # We stored page instances in init_pages, so direct traversal is not needed for Search/Library.
             pass
         return None
+
     def on_window_key_pressed(self, controller, keyval, keycode, state):
         # Handle Escape key for Back / Close Search
         if keyval == Gdk.KEY_Escape:
@@ -657,7 +982,7 @@ class MainWindow(Adw.ApplicationWindow):
                 # Clear focus from entry to ensure next keys are handled by the window
                 self.grab_focus()
                 return True
-            
+
             if self.back_btn.get_visible():
                 self.on_back_clicked(None)
                 return True
@@ -676,9 +1001,13 @@ class MainWindow(Adw.ApplicationWindow):
         char = chr(uni)
         if not char.isprintable():
             return False
-        
+
         # 3. Ignore control/alt/meta keys
-        mask = state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.META_MASK)
+        mask = state & (
+            Gdk.ModifierType.CONTROL_MASK
+            | Gdk.ModifierType.ALT_MASK
+            | Gdk.ModifierType.META_MASK
+        )
         if mask:
             return False
 
@@ -687,20 +1016,20 @@ class MainWindow(Adw.ApplicationWindow):
             if self.view_stack.get_visible_child_name() != "search":
                 # Ensure we switch tab before SearchBar captures the character
                 self.view_stack.set_visible_child_name("search")
-            
+
             # Ensure search tab is at root (results view)
             nav = self.view_stack.get_child_by_name("search")
             if isinstance(nav, Adw.NavigationView):
                 root_page = nav.get_visible_page()
                 if root_page and nav.get_previous_page(root_page):
                     nav.pop_to_tag("root")
-            
+
             # Manually trigger search mode and insert the character
             # This avoids the "ignored first character" bug during tab switches
             self.search_bar.set_search_mode(True)
             self.search_entry.grab_focus()
             self.search_entry.set_text(char)
-            self.search_entry.set_position(-1) # Move cursor to end
+            self.search_entry.set_position(-1)  # Move cursor to end
             return True
 
         # Let the event propagate so GtkSearchBar can capture it
@@ -717,7 +1046,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Global Search Redirection (Safety fallback)
             if self.view_stack.get_visible_child_name() != "search":
                 GLib.idle_add(self.view_stack.set_visible_child_name, "search")
-            
+
             nav = self.view_stack.get_child_by_name("search")
             if isinstance(nav, Adw.NavigationView):
                 root_page = nav.get_visible_page()
@@ -731,7 +1060,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_bar.set_search_mode(False)
         # Crucial: Clear focus so the next Esc goes to the Window Controller
         self.grab_focus()
-        
+
         filterable_child = self._get_active_filterable_child()
         if filterable_child:
             filterable_child.filter_content("")
@@ -749,7 +1078,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if self.view_stack.get_visible_child_name() != "search":
                     # Use idle_add to avoid issues with current signal processing
                     GLib.idle_add(self.view_stack.set_visible_child_name, "search")
-                
+
                 # Reset search view to root
                 nav = self.view_stack.get_child_by_name("search")
                 if isinstance(nav, Adw.NavigationView):
@@ -802,7 +1131,7 @@ class MainWindow(Adw.ApplicationWindow):
             playlist_page.set_compact_mode(True)
         elif hasattr(self, "view_switcher_bar") and self.view_switcher_bar.get_reveal():
             playlist_page.set_compact_mode(True)
-        
+
         # Connect tab re-click logic if not already done?
         # (This is handled globally in init_pages now)
 
@@ -866,7 +1195,9 @@ class MainWindow(Adw.ApplicationWindow):
         from ui.pages.discography import DiscographyPage
 
         disco_page = DiscographyPage(self.player, self.open_playlist)
-        disco_page.connect("header-title-changed", self.on_playlist_header_title_changed)
+        disco_page.connect(
+            "header-title-changed", self.on_playlist_header_title_changed
+        )
 
         nav_page = Adw.NavigationPage(child=disco_page, title=title)
 
@@ -889,7 +1220,7 @@ class MainWindow(Adw.ApplicationWindow):
         mood_page.connect("header-title-changed", self.on_playlist_header_title_changed)
 
         nav_page = Adw.NavigationPage(child=mood_page, title=title)
-        
+
         active_nav.push(nav_page)
 
         mood_page.load_mood(params, title)
@@ -906,7 +1237,9 @@ class MainWindow(Adw.ApplicationWindow):
         from ui.pages.all_moods import AllMoodsPage
 
         all_moods_page = AllMoodsPage(items, title)
-        all_moods_page.connect("header-title-changed", self.on_playlist_header_title_changed)
+        all_moods_page.connect(
+            "header-title-changed", self.on_playlist_header_title_changed
+        )
 
         display_title = f"All {title}"
         if title == "Moods & Moments":
@@ -924,6 +1257,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         from ui.pages.category import CategoryPage
+
         cat_page = CategoryPage(self.player, self.open_playlist)
         cat_page.connect("header-title-changed", self.on_playlist_header_title_changed)
 
@@ -953,19 +1287,29 @@ class MainWindow(Adw.ApplicationWindow):
         # Fallback: resolve via get_song API (won't work for uploaded songs)
         vid = self.player.current_video_id
         if vid:
-            threading.Thread(target=self._resolve_artist_from_player, daemon=True).start()
+            threading.Thread(
+                target=self._resolve_artist_from_player, daemon=True
+            ).start()
 
     def _open_upload_artist(self, browse_id, name):
         """Open an uploaded artist as a pseudo-playlist."""
         if hasattr(self, "uploads_page"):
             # Use the UploadsPage's artist handler
-            self.uploads_page._on_artist_activated(None, type('Row', (), {
-                'artist_data': {'browseId': browse_id, 'artist': name}
-            })())
-        elif hasattr(self, "library_page") and hasattr(self.library_page, "uploads_page"):
-            self.library_page.uploads_page._on_artist_activated(None, type('Row', (), {
-                'artist_data': {'browseId': browse_id, 'artist': name}
-            })())
+            self.uploads_page._on_artist_activated(
+                None,
+                type(
+                    "Row", (), {"artist_data": {"browseId": browse_id, "artist": name}}
+                )(),
+            )
+        elif hasattr(self, "library_page") and hasattr(
+            self.library_page, "uploads_page"
+        ):
+            self.library_page.uploads_page._on_artist_activated(
+                None,
+                type(
+                    "Row", (), {"artist_data": {"browseId": browse_id, "artist": name}}
+                )(),
+            )
 
     def _resolve_artist_from_player(self):
         vid = self.player.current_video_id
@@ -1055,32 +1399,48 @@ class MainWindow(Adw.ApplicationWindow):
             if row.name_id == "library":
                 self.library_page.load_library()
 
+    def _is_online(self):
+        """Quick check if we have network connectivity."""
+        import socket
+
+        try:
+            socket.create_connection(("music.youtube.com", 443), timeout=3)
+            return True
+        except OSError:
+            return False
+
     def check_auth(self):
         from api.client import MusicClient
         from ui.login import LoginDialog
 
         client = MusicClient()
 
-        # If no auth file at all, show login immediately
+        # If no auth file at all and we're online, show login
         if not client.is_authenticated():
-            print("Authentication missing. Showing login dialog.")
-            GObject.timeout_add(500, lambda: self.show_login(LoginDialog))
+            if self._is_online():
+                print("Authentication missing. Showing login dialog.")
+                GObject.timeout_add(500, lambda: self.show_login(LoginDialog))
+            else:
+                print("Offline and no auth. Running in offline mode.")
+                self.add_toast("No internet - running in offline mode")
             return
 
-        # Validate session in background to avoid blocking the window
+        # Validate session in background, but only if online
         def _validate():
+            if not self._is_online():
+                print("Offline - skipping auth validation, using cached session.")
+                GLib.idle_add(self.add_toast, "Offline mode - using cached library")
+                return
             valid = client.validate_session()
             if not valid:
                 client._is_authed = False
                 GLib.idle_add(self._on_auth_invalid)
 
-        def _on_done():
-            pass
-
         threading.Thread(target=_validate, daemon=True).start()
 
     def _on_auth_invalid(self):
         from ui.login import LoginDialog
+
         print("Authentication invalid. Showing login dialog.")
         self.show_login(LoginDialog)
 
@@ -1112,7 +1472,7 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "split_view"):
             # Set sidebar to False but DO NOT update self._sidebar_explicitly_opened
             self.split_view.set_show_sidebar(False)
-        
+
         # Dynamic Reparenting for ExpandedPlayer
         if hasattr(self, "expanded_player"):
             parent = self.expanded_player.get_parent()
@@ -1131,7 +1491,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         if hasattr(self, "player_bar"):
             self.player_bar.set_compact(False)
-        
+
         # Close BottomSheet when moving back to desktop
         if hasattr(self, "bottom_sheet"):
             self.bottom_sheet.set_open(False)
@@ -1153,9 +1513,11 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "split_view"):
             has_queue = len(self.player.queue) > 0
             show = self._sidebar_explicitly_opened and has_queue
-            print(f"[DEBUG-UI] _restore_sidebar_state: show={show}, explicitly_opened={self._sidebar_explicitly_opened}, has_queue={has_queue}, collapsed={self.split_view.get_collapsed()}")
+            print(
+                f"[DEBUG-UI] _restore_sidebar_state: show={show}, explicitly_opened={self._sidebar_explicitly_opened}, has_queue={has_queue}, collapsed={self.split_view.get_collapsed()}"
+            )
             self.split_view.set_show_sidebar(show)
-        return False # Run once
+        return False  # Run once
 
     def _sync_page_compact(self):
         # Notify current pages
@@ -1164,7 +1526,7 @@ class MainWindow(Adw.ApplicationWindow):
                 page = getattr(self, f"{page_name}_page")
                 if hasattr(page, "set_compact_mode"):
                     page.set_compact_mode(self._is_compact)
-        
+
         # Also notify any dynamic pages in navigation stacks?
         # For simplicity, we can look at the visible page of the navigation stack
         nav = self.view_stack.get_visible_child()
@@ -1187,13 +1549,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_player_bar_visibility(self, player, *args):
         has_queue = len(self.player.queue) > 0
         self.player_bar_revealer.set_reveal_child(has_queue)
-        
+
         # Also close sidebar if queue becomes empty
         if not has_queue and hasattr(self, "split_view"):
             if self.split_view.get_show_sidebar():
                 print("[DEBUG-UI] Closing sidebar because queue is empty")
                 self.split_view.set_show_sidebar(False)
-                # Should we reset _sidebar_explicitly_opened? 
+                # Should we reset _sidebar_explicitly_opened?
                 # Probably yes, as the "context" is gone.
                 self._sidebar_explicitly_opened = False
 
@@ -1209,18 +1571,22 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "split_view"):
             current = self.split_view.get_show_sidebar()
             new_state = not current
-            print(f"[DEBUG-UI] toggle_queue. Current={current}, New={new_state}, Has queue={len(self.player.queue) > 0}")
-            
+            print(
+                f"[DEBUG-UI] toggle_queue. Current={current}, New={new_state}, Has queue={len(self.player.queue) > 0}"
+            )
+
             if new_state and not self.player.queue:
                 print(f"[DEBUG-UI] toggle_queue: Refusing to open empty queue")
                 return False
-                
+
             self.split_view.set_show_sidebar(new_state)
-            
+
             # Persist state only when not collapsed (desktop view)
             # or if explicitly toggled in mobile overlay
             self._sidebar_explicitly_opened = new_state
-            print(f"[DEBUG-UI] sidebar_explicitly_opened set to: {self._sidebar_explicitly_opened}")
+            print(
+                f"[DEBUG-UI] sidebar_explicitly_opened set to: {self._sidebar_explicitly_opened}"
+            )
 
         # Refresh explore/search
         if hasattr(self, "search_page"):

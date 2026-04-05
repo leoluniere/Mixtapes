@@ -151,7 +151,7 @@ class DiscographyPage(Adw.Bin):
                 if self.browse_id and "Top Songs" in self.title:
                     pass
                 elif self.browse_id and self.params:
-                    # Albums, singles, videos — get_artist_albums with raw parser fallback
+                    # Albums, singles, videos - get_artist_albums with raw parser fallback
                     new_items = self.client.get_artist_albums(
                         self.browse_id, self.params, limit=100
                     )
@@ -162,7 +162,9 @@ class DiscographyPage(Adw.Bin):
                         res = self.client.get_playlist(self.browse_id)
                         new_items = res.get("tracks", []) if res else []
                     except Exception:
-                        new_items = self.client._raw_parse_channel_content(self.browse_id, None)
+                        new_items = self.client._raw_parse_channel_content(
+                            self.browse_id, None
+                        )
                     self._has_more = False
 
                 def update_cb():
@@ -174,8 +176,13 @@ class DiscographyPage(Adw.Bin):
                                 if item.get(key):
                                     existing_ids.add(item[key])
                         filtered_items = [
-                            item for item in new_items
-                            if not any(item.get(k) in existing_ids for k in ("browseId", "videoId", "playlistId") if item.get(k))
+                            item
+                            for item in new_items
+                            if not any(
+                                item.get(k) in existing_ids
+                                for k in ("browseId", "videoId", "playlistId")
+                                if item.get(k)
+                            )
                         ]
 
                         self.items.extend(filtered_items)

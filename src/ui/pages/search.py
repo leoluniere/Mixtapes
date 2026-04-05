@@ -81,6 +81,9 @@ class SearchPage(Adw.Bin):
         # Show explore initially
         self.stack.set_visible_child_name("explore")
 
+        # Load saved chart country preference
+        self._charts_country = self._load_charts_country()
+
         # Load explore data
         self.load_explore_data()
 
@@ -138,17 +141,53 @@ class SearchPage(Adw.Bin):
         self.load_explore_data()
 
     def _fetch_explore(self):
+        from ui.utils import is_online
+        if not is_online():
+            GObject.idle_add(self.update_explore_ui, None)
+            return
         try:
             explore = self.client.get_explore()
             categories = self.client.get_mood_categories()
             if categories:
                 explore["separated_categories"] = categories
+            # Fetch charts
+            country = getattr(self, '_charts_country', 'ZZ')
+            try:
+                charts = self.client.get_charts(country)
+                explore["_charts"] = charts
+            except Exception:
+                pass
             GObject.idle_add(self.update_explore_ui, explore)
         except Exception as e:
             print(f"Error fetching explore data: {e}")
+            GObject.idle_add(self.update_explore_ui, None)
 
     def update_explore_ui(self, data):
         if not data:
+            # Check if offline
+            from ui.utils import is_online
+            if not is_online():
+                child = self.explore_box.get_first_child()
+                while child:
+                    next_child = child.get_next_sibling()
+                    self.explore_box.remove(child)
+                    child = next_child
+                offline_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+                offline_box.set_valign(Gtk.Align.CENTER)
+                offline_box.set_halign(Gtk.Align.CENTER)
+                offline_box.set_vexpand(True)
+                offline_icon = Gtk.Image.new_from_icon_name("network-offline-symbolic")
+                offline_icon.set_pixel_size(48)
+                offline_icon.add_css_class("dim-label")
+                offline_box.append(offline_icon)
+                offline_label = Gtk.Label(label="You're offline")
+                offline_label.add_css_class("title-3")
+                offline_box.append(offline_label)
+                offline_sub = Gtk.Label(label="Explore requires an internet connection.\nYour downloaded songs are still available.")
+                offline_sub.add_css_class("dim-label")
+                offline_sub.set_justify(Gtk.Justification.CENTER)
+                offline_box.append(offline_sub)
+                self.explore_box.append(offline_box)
             return
 
         # Clear existing explore content
@@ -198,6 +237,11 @@ class SearchPage(Adw.Bin):
                 self.explore_box, "Trending", data["trending"]["items"][:5]
             )
 
+        # Charts
+        charts = data.get("_charts")
+        if charts:
+            self._add_charts_sections(charts)
+
     def add_horizontal_section(self, parent_box, title, items, is_category=False):
         if not items:
             return
@@ -241,6 +285,281 @@ class SearchPage(Adw.Bin):
 
         scroll_box.set_content(h_box)
         section_box.append(scroll_box)
+
+    def _add_charts_sections(self, charts):
+        """Add charts sections: country selector, trending playlists, genre charts, top artists."""
+
+        # ── Country selector + Charts header ──
+        charts_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        charts_label = Gtk.Label(label="Charts")
+        charts_label.add_css_class("title-3")
+        charts_label.set_halign(Gtk.Align.START)
+        charts_header.append(charts_label)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        charts_header.append(spacer)
+
+        # Country dropdown
+        countries = charts.get("countries", {})
+        options = countries.get("options", [])
+
+        if options:
+            # Map country codes to display names
+            _COUNTRY_NAMES = {
+                "ZZ": "Global", "AR": "Argentina", "AU": "Australia", "AT": "Austria",
+                "BE": "Belgium", "BO": "Bolivia", "BR": "Brazil", "CA": "Canada",
+                "CL": "Chile", "CO": "Colombia", "CR": "Costa Rica", "CZ": "Czechia",
+                "DK": "Denmark", "DO": "Dominican Republic", "EC": "Ecuador",
+                "EG": "Egypt", "SV": "El Salvador", "EE": "Estonia", "FI": "Finland",
+                "FR": "France", "DE": "Germany", "GT": "Guatemala", "HN": "Honduras",
+                "HU": "Hungary", "IS": "Iceland", "IN": "India", "ID": "Indonesia",
+                "IE": "Ireland", "IL": "Israel", "IT": "Italy", "JP": "Japan",
+                "KE": "Kenya", "LU": "Luxembourg", "MX": "Mexico", "NL": "Netherlands",
+                "NZ": "New Zealand", "NI": "Nicaragua", "NG": "Nigeria", "NO": "Norway",
+                "PA": "Panama", "PY": "Paraguay", "PE": "Peru", "PH": "Philippines",
+                "PL": "Poland", "PT": "Portugal", "RO": "Romania", "RU": "Russia",
+                "SA": "Saudi Arabia", "RS": "Serbia", "ZA": "South Africa",
+                "KR": "South Korea", "ES": "Spain", "SE": "Sweden", "CH": "Switzerland",
+                "TZ": "Tanzania", "TR": "Turkey", "UG": "Uganda", "UA": "Ukraine",
+                "AE": "UAE", "GB": "United Kingdom", "US": "United States",
+                "UY": "Uruguay", "VE": "Venezuela", "VN": "Vietnam", "ZW": "Zimbabwe",
+            }
+            display_names = [_COUNTRY_NAMES.get(c, c) for c in options]
+            # Sort by display name but keep Global first
+            paired = list(zip(display_names, options))
+            paired.sort(key=lambda x: ("" if x[1] == "ZZ" else x[0]))
+            display_names = [p[0] for p in paired]
+            sorted_codes = [p[1] for p in paired]
+
+            country_items = Gtk.StringList.new(display_names)
+            country_dropdown = Gtk.DropDown(model=country_items)
+            country_dropdown.add_css_class("flat")
+
+            current = getattr(self, '_charts_country', 'ZZ')
+            for i, code in enumerate(sorted_codes):
+                if code == current:
+                    country_dropdown.set_selected(i)
+                    break
+
+            country_dropdown.connect("notify::selected", self._on_charts_country_changed, sorted_codes)
+            charts_header.append(country_dropdown)
+
+        self.explore_box.append(charts_header)
+
+        # ── Trending playlists (horizontal scroll) ──
+        videos = charts.get("videos", [])
+        if videos:
+            self._add_chart_playlists("Trending", videos)
+
+        # ── Genre charts (horizontal scroll of pills) ──
+        genres = charts.get("genres", [])
+        if genres:
+            self._add_chart_playlists("Genre Charts", genres)
+
+        # ── Top Artists (ranked list) ──
+        artists = charts.get("artists", [])
+        if artists:
+            self._add_chart_artists("Top Artists", artists)
+
+    def _add_chart_playlists(self, title, items):
+        """Add a horizontal scroll section of chart playlist cards."""
+        from ui.utils import AsyncImage
+
+        section_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.explore_box.append(section_box)
+
+        label = Gtk.Label(label=title)
+        label.add_css_class("heading")
+        label.set_halign(Gtk.Align.START)
+        section_box.append(label)
+
+        from ui.widgets.scroll_box import HorizontalScrollBox
+        scroll_box = HorizontalScrollBox()
+
+        h_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        h_box.set_margin_bottom(8)
+
+        for item in items:
+            thumb_url = item.get("thumbnails", [{}])[-1].get("url") if item.get("thumbnails") else None
+
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
+            card.add_css_class("artist-horizontal-item")
+            card.item_data = item
+
+            img = AsyncImage(url=thumb_url, size=160, player=self.player)
+            wrapper = Gtk.Box()
+            wrapper.set_overflow(Gtk.Overflow.HIDDEN)
+            wrapper.add_css_class("card")
+            wrapper.set_halign(Gtk.Align.CENTER)
+            wrapper.append(img)
+            card.append(wrapper)
+
+            name_label = Gtk.Label(label=item.get("title", ""))
+            name_label.set_ellipsize(Pango.EllipsizeMode.END)
+            name_label.set_wrap(True)
+            name_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            name_label.set_lines(2)
+            name_label.set_halign(Gtk.Align.START)
+            clamp = Adw.Clamp(maximum_size=160)
+            clamp.set_child(name_label)
+            card.append(clamp)
+
+            click = Gtk.GestureClick()
+            click.set_button(1)
+            click.connect("released", self._on_chart_playlist_clicked, item)
+            card.add_controller(click)
+
+            h_box.append(card)
+
+        scroll_box.set_content(h_box)
+        section_box.append(scroll_box)
+
+    def _add_chart_artists(self, title, artists):
+        """Add a ranked list of chart artists."""
+        from ui.utils import AsyncPicture
+
+        section_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.explore_box.append(section_box)
+
+        label = Gtk.Label(label=title)
+        label.add_css_class("heading")
+        label.set_halign(Gtk.Align.START)
+        section_box.append(label)
+
+        list_box = Gtk.ListBox()
+        list_box.add_css_class("boxed-list")
+        list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        list_box.connect("row-activated", self._on_chart_artist_activated)
+
+        # Show top 20
+        for artist in artists[:20]:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            box.add_css_class("song-row")
+            row.set_child(box)
+
+            # Rank number
+            rank = artist.get("rank", "")
+            rank_label = Gtk.Label(label=str(rank))
+            rank_label.set_width_chars(3)
+            rank_label.add_css_class("heading")
+            rank_label.set_valign(Gtk.Align.CENTER)
+            box.append(rank_label)
+
+            # Trend indicator
+            trend = artist.get("trend", "neutral")
+            if trend == "up":
+                trend_icon = Gtk.Image.new_from_icon_name("go-up-symbolic")
+                trend_icon.add_css_class("success")
+            elif trend == "down":
+                trend_icon = Gtk.Image.new_from_icon_name("go-down-symbolic")
+                trend_icon.add_css_class("error")
+            else:
+                trend_icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
+                trend_icon.add_css_class("dim-label")
+            trend_icon.set_valign(Gtk.Align.CENTER)
+            trend_icon.set_pixel_size(12)
+            box.append(trend_icon)
+
+            # Thumbnail
+            thumb_url = artist.get("thumbnails", [{}])[-1].get("url") if artist.get("thumbnails") else None
+            img = AsyncPicture(
+                url=thumb_url, target_size=56, crop_to_square=True, player=self.player,
+            )
+            img.add_css_class("song-img")
+            root = self.get_root()
+            img.set_compact(getattr(root, '_is_compact', False) if root else False)
+            if not thumb_url:
+                img.set_from_icon_name("avatar-default-symbolic")
+            box.append(img)
+
+            # Name + subscribers
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            vbox.set_valign(Gtk.Align.CENTER)
+            vbox.set_hexpand(True)
+
+            name_label = Gtk.Label(label=artist.get("title", "Unknown"))
+            name_label.set_halign(Gtk.Align.START)
+            name_label.set_ellipsize(Pango.EllipsizeMode.END)
+            name_label.set_lines(1)
+            vbox.append(name_label)
+
+            subs = artist.get("subscribers", "")
+            if subs:
+                sub_label = Gtk.Label(label=subs)
+                sub_label.set_halign(Gtk.Align.START)
+                sub_label.add_css_class("dim-label")
+                sub_label.add_css_class("caption")
+                vbox.append(sub_label)
+
+            box.append(vbox)
+
+            row.artist_data = artist
+            row.set_activatable(True)
+            list_box.append(row)
+
+        section_box.append(list_box)
+
+    def _on_charts_country_changed(self, dropdown, pspec, options):
+        idx = dropdown.get_selected()
+        if 0 <= idx < len(options):
+            self._charts_country = options[idx]
+            self._save_charts_country(options[idx])
+            self.load_explore_data()
+
+    @staticmethod
+    def _get_prefs_path():
+        import os
+        return os.path.join(GLib.get_user_data_dir(), "muse", "prefs.json")
+
+    def _save_charts_country(self, code):
+        import json, os
+        path = self._get_prefs_path()
+        prefs = {}
+        try:
+            if os.path.exists(path):
+                with open(path) as f:
+                    prefs = json.load(f)
+        except Exception:
+            pass
+        prefs["charts_country"] = code
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(prefs, f)
+
+    def _load_charts_country(self):
+        import json, os
+        path = self._get_prefs_path()
+        try:
+            if os.path.exists(path):
+                with open(path) as f:
+                    prefs = json.load(f)
+                return prefs.get("charts_country", "ZZ")
+        except Exception:
+            pass
+        return "ZZ"
+
+    def _on_chart_playlist_clicked(self, gesture, n_press, x, y, item):
+        playlist_id = item.get("playlistId")
+        if playlist_id:
+            root = self.get_root()
+            if root and hasattr(root, "open_playlist"):
+                root.open_playlist(playlist_id, {
+                    "title": item.get("title", ""),
+                    "thumb": item.get("thumbnails", [{}])[-1].get("url") if item.get("thumbnails") else None,
+                })
+
+    def _on_chart_artist_activated(self, listbox, row):
+        if hasattr(row, "artist_data"):
+            browse_id = row.artist_data.get("browseId")
+            name = row.artist_data.get("title")
+            if browse_id:
+                root = self.get_root()
+                if root and hasattr(root, "open_artist"):
+                    root.open_artist(browse_id, name)
 
     def on_view_all_clicked(self, items, title):
         root = self.get_root()
@@ -468,8 +787,38 @@ class SearchPage(Adw.Bin):
         return False
 
     def _search_thread(self, query):
-        results = self.client.search(query)
-        GObject.idle_add(self.update_results, results)
+        from ui.utils import is_online
+        if is_online():
+            results = self.client.search(query)
+            GObject.idle_add(self.update_results, results)
+        else:
+            # Offline: search local downloads
+            results = self._search_local(query)
+            GObject.idle_add(self.update_results, results)
+
+    def _search_local(self, query):
+        """Search downloaded songs in the local database."""
+        from player.downloads import get_download_db
+        db = get_download_db()
+        all_downloads = db.get_all_downloads()
+        query_lower = query.lower()
+        results = []
+        for d in all_downloads:
+            title = (d.get("title") or "").lower()
+            artist = (d.get("artist") or "").lower()
+            album = (d.get("album") or "").lower()
+            if query_lower in title or query_lower in artist or query_lower in album:
+                results.append({
+                    "resultType": "song",
+                    "title": d.get("title", ""),
+                    "videoId": d.get("video_id", ""),
+                    "artists": [{"name": d.get("artist", ""), "id": None}],
+                    "album": {"name": d.get("album", "")},
+                    "thumbnails": [{"url": d.get("thumbnail_url", "")}] if d.get("thumbnail_url") else [],
+                    "duration_seconds": d.get("duration_seconds", 0),
+                    "isExplicit": False,
+                })
+        return results
 
     def update_results(self, results):
         # self.spinner.stop()

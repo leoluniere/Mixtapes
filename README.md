@@ -68,7 +68,7 @@ This is a list of all the features that are planned for Mixtapes:
   - ✅️ Moods & Moments
   - ✅️ Genres
   - ✅️ Trending
-  - 🔜 Charts
+  - ✅️ Charts
   - 🔜 Home Page
 - ✅️ **Artist Page**: View artist details and discography.
   - ✅️ Basic artist info.
@@ -113,7 +113,7 @@ This is a list of all the features that are planned for Mixtapes:
 - 🔜 **Lyrics**: View synchronized lyrics, maybe even using BetterLyrics API.
 - ☑️ **Settings**: Configure app preferences (theme, audio quality, etc.).
   > There isn't much to configure yet.
-- 🔜 **Download Support**: Download tracks for offline playback, even as local files.
+- ✅️ **Download Support**: Download tracks for offline playback, even as local files.
 - ✅️ **Radio / Mixes**: Start a radio station from a song or artist.
 - 🔜 **Windows/macOS**: Builds for macOS and Windows
   > Requires quite a bit of tinkering, not my highest priority

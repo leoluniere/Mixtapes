@@ -29,6 +29,7 @@
               python314Packages.yt-dlp
               python314Packages.yt-dlp-ejs
               python314Packages.requests
+              python314Packages.mutagen
               python314Packages.mprisify
               nodejs
             ];

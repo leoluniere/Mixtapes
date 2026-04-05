@@ -86,8 +86,15 @@ class SongRowWidget(Gtk.Box):
         self.explicit_badge.set_justify(Gtk.Justification.CENTER)
         self.explicit_badge.set_visible(False)
 
+        self.dl_icon = Gtk.Image.new_from_icon_name("folder-download-symbolic")
+        self.dl_icon.set_pixel_size(14)
+        self.dl_icon.add_css_class("dim-label")
+        self.dl_icon.set_valign(Gtk.Align.CENTER)
+        self.dl_icon.set_visible(False)
+
         self.title_box.append(self.title_label)
         self.title_box.append(self.explicit_badge)
+        self.title_box.append(self.dl_icon)
 
         self.subtitle_label = Gtk.Label()
         self.subtitle_label.set_halign(Gtk.Align.START)
@@ -171,6 +178,12 @@ class SongRowWidget(Gtk.Box):
             self.img.load_url(item.thumbnail_url)
 
         self.like_btn.set_data(item.video_id, item.like_status)
+
+        # Downloaded indicator
+        if item.video_id:
+            self.dl_icon.set_visible(self.player.download_manager.is_downloaded(item.video_id))
+        else:
+            self.dl_icon.set_visible(False)
 
         if not item.video_id:
             self.row.set_sensitive(False)
@@ -349,8 +362,10 @@ class SongRowWidget(Gtk.Box):
             menu_model.append_section(None, nav_section)
 
         # Actions section
+        from ui.utils import is_online
+        _online = is_online()
         action_section = Gio.Menu()
-        if item.video_id:
+        if item.video_id and _online:
             action_section.append("Start Radio", "row.start_radio")
             playlists = self.client.get_editable_playlists()
             if playlists:
@@ -361,12 +376,26 @@ class SongRowWidget(Gtk.Box):
                     if p_id:
                         playlist_menu.append(p_title, f"row.add_to_playlist('{p_id}')")
                 action_section.append_submenu("Add to Playlist", playlist_menu)
+        # Download
+        if item.video_id and _online:
+            root = self.get_root()
+            is_dl = root and hasattr(root, 'player') and root.player.download_manager.is_downloaded(item.video_id)
+            if not is_dl:
+                action_section.append("Download", "row.download")
+                def download_action(action, param):
+                    r = self.get_root()
+                    if r and hasattr(r, "download_track"):
+                        r.download_track(item.track_data)
+                a_dl = Gio.SimpleAction.new("download", None)
+                a_dl.connect("activate", download_action)
+                group.add_action(a_dl)
+
         if action_section.get_n_items() > 0:
             menu_model.append_section(None, action_section)
 
         # Clipboard section
         clip_section = Gio.Menu()
-        if item.video_id:
+        if item.video_id and _online:
             clip_section.append("Copy Link", "row.copy_link")
         if clip_section.get_n_items() > 0:
             menu_model.append_section(None, clip_section)

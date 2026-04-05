@@ -66,12 +66,24 @@ class MusicClient:
         self.auth_path = os.path.join(data_dir, "headers_auth.json")
         self._is_authed = False
         self._playlist_cache = {}  # Cache fully-fetched playlists
+        self._download_db = None  # Lazy-loaded DownloadDB for offline cache
         self._user_info = None  # Cache for account info
         self._subscribed_artists = set()  # Set of channel IDs
         self._library_playlists = []  # Cache for editable playlists
         self._library_playlist_ids = set()  # IDs of all library playlists
         self._library_album_ids = set()  # Browse IDs of all library albums
         self.try_login(skip_validation=True)
+
+    @property
+    def _offline_db(self):
+        if self._download_db is None:
+            try:
+                from player.downloads import DownloadDB
+
+                self._download_db = DownloadDB()
+            except Exception:
+                pass
+        return self._download_db
 
     def try_login(self, skip_validation=False):
         # 1. Try saved headers_auth.json (Preferred)
@@ -290,16 +302,37 @@ class MusicClient:
 
     def get_library_playlists(self):
         if not self.is_authenticated():
+            # Offline fallback
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_playlists()
+                if cached:
+                    return cached
             return []
-        playlists = self.api.get_library_playlists()
-        self._library_playlists = playlists
-        self._library_playlist_ids = {
-            p.get("playlistId") for p in playlists if p.get("playlistId")
-        }
-        return playlists
+        try:
+            playlists = self.api.get_library_playlists()
+            self._library_playlists = playlists
+            self._library_playlist_ids = {
+                p.get("playlistId") for p in playlists if p.get("playlistId")
+            }
+            # Cache for offline use
+            if self._offline_db and playlists:
+                self._offline_db.cache_library_playlists(playlists)
+            return playlists
+        except Exception as e:
+            print(f"Error fetching library playlists: {e}")
+            # Fall back to cache
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_playlists()
+                if cached:
+                    return cached
+            return []
 
     def get_library_albums(self, limit=100):
         if not self.is_authenticated():
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_albums()
+                if cached:
+                    return cached
             return []
         try:
             albums = self.api.get_library_albums(limit=limit)
@@ -311,9 +344,15 @@ class MusicClient:
                     self._library_album_ids.add(a["audioPlaylistId"])
                 if a.get("playlistId"):
                     self._library_album_ids.add(a["playlistId"])
+            if self._offline_db and albums:
+                self._offline_db.cache_library_albums(albums)
             return albums
         except Exception as e:
             print(f"Error fetching library albums: {e}")
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_albums()
+                if cached:
+                    return cached
             return []
 
     def is_in_library(self, playlist_id):
@@ -460,6 +499,10 @@ class MusicClient:
 
     def get_library_subscriptions(self, limit=None):
         if not self.is_authenticated():
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_artists()
+                if cached:
+                    return cached
             return []
         try:
             subs = self.api.get_library_subscriptions(limit=limit)
@@ -468,9 +511,15 @@ class MusicClient:
                     bid = s.get("browseId")
                     if bid:
                         self._subscribed_artists.add(bid)
+                if self._offline_db:
+                    self._offline_db.cache_library_artists(subs)
             return subs
         except Exception as e:
             print(f"Error fetching library subscriptions: {e}")
+            if self._offline_db:
+                cached = self._offline_db.get_cached_library_artists()
+                if cached:
+                    return cached
             return []
 
     def get_account_info(self):
@@ -542,8 +591,31 @@ class MusicClient:
 
     def get_playlist(self, playlist_id, limit=None):
         if not self.api:
+            # Offline: try cache
+            if self._offline_db:
+                cached = self._offline_db.get_cached_playlist(playlist_id)
+                if cached:
+                    return cached
             return None
-        return self.api.get_playlist(playlist_id, limit=limit)
+        try:
+            result = self.api.get_playlist(playlist_id, limit=limit)
+            # Cache the full result for offline use
+            if result and self._offline_db:
+                self._offline_db.cache_playlist(
+                    playlist_id,
+                    result.get("title", ""),
+                    str(result.get("author", "")),
+                    result.get("trackCount", len(result.get("tracks", []))),
+                    result.get("tracks", []),
+                )
+            return result
+        except Exception as e:
+            print(f"Error fetching playlist: {e}")
+            if self._offline_db:
+                cached = self._offline_db.get_cached_playlist(playlist_id)
+                if cached:
+                    return cached
+            return None
 
     def get_watch_playlist(
         self, video_id=None, playlist_id=None, limit=25, radio=False
@@ -567,8 +639,29 @@ class MusicClient:
 
     def get_album(self, browse_id):
         if not self.api:
+            if self._offline_db:
+                cached = self._offline_db.get_cached_playlist(browse_id)
+                if cached:
+                    return cached
             return None
-        return self.api.get_album(browse_id)
+        try:
+            result = self.api.get_album(browse_id)
+            if result and self._offline_db:
+                self._offline_db.cache_playlist(
+                    browse_id,
+                    result.get("title", ""),
+                    str(result.get("artists", "")),
+                    result.get("trackCount", len(result.get("tracks", []))),
+                    result.get("tracks", []),
+                )
+            return result
+        except Exception as e:
+            print(f"Error fetching album: {e}")
+            if self._offline_db:
+                cached = self._offline_db.get_cached_playlist(browse_id)
+                if cached:
+                    return cached
+            return None
 
     def get_artist(self, channel_id):
         if not self.api:
@@ -590,22 +683,41 @@ class MusicClient:
                     try:
                         raw = self.api._send_request("browse", {"browseId": channel_id})
                         header = raw.get("header", {})
-                        for hkey in ["musicVisualHeaderRenderer", "musicImmersiveHeaderRenderer"]:
+                        for hkey in [
+                            "musicVisualHeaderRenderer",
+                            "musicImmersiveHeaderRenderer",
+                        ]:
                             h = header.get(hkey, {})
                             if h:
                                 # Avatar (foregroundThumbnail)
-                                fg = h.get("foregroundThumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
+                                fg = (
+                                    h.get("foregroundThumbnail", {})
+                                    .get("musicThumbnailRenderer", {})
+                                    .get("thumbnail", {})
+                                    .get("thumbnails", [])
+                                )
                                 if fg:
                                     user_data["thumbnails"] = fg
                                 # Banner (thumbnail)
-                                bg = h.get("thumbnail", {}).get("musicThumbnailRenderer", {}).get("thumbnail", {}).get("thumbnails", [])
+                                bg = (
+                                    h.get("thumbnail", {})
+                                    .get("musicThumbnailRenderer", {})
+                                    .get("thumbnail", {})
+                                    .get("thumbnails", [])
+                                )
                                 if bg:
                                     user_data["banner"] = bg
                                 # Subscriber count from subscriptionButton
-                                sub_btn = h.get("subscriptionButton", {}).get("subscribeButtonRenderer", {})
-                                sub_count = sub_btn.get("subscriberCountText", {}).get("runs", [])
+                                sub_btn = h.get("subscriptionButton", {}).get(
+                                    "subscribeButtonRenderer", {}
+                                )
+                                sub_count = sub_btn.get("subscriberCountText", {}).get(
+                                    "runs", []
+                                )
                                 if sub_count:
-                                    user_data["subscribers"] = sub_count[0].get("text", "")
+                                    user_data["subscribers"] = sub_count[0].get(
+                                        "text", ""
+                                    )
                                 break
                     except Exception:
                         pass
@@ -613,7 +725,11 @@ class MusicClient:
                     if "thumbnails" not in user_data:
                         for section_key in ["playlists", "videos", "songs"]:
                             section = user_data.get(section_key, {})
-                            results = section.get("results", []) if isinstance(section, dict) else (section if isinstance(section, list) else [])
+                            results = (
+                                section.get("results", [])
+                                if isinstance(section, dict)
+                                else (section if isinstance(section, list) else [])
+                            )
                             if results and results[0].get("thumbnails"):
                                 user_data["thumbnails"] = results[0]["thumbnails"]
                                 break
@@ -647,6 +763,56 @@ class MusicClient:
             pass
         return []
 
+    def _raw_parse_playlist(self, browse_id):
+        """Parse a playlist from raw API when ytmusicapi can't handle it (e.g. chart playlists)."""
+        body = {"browseId": browse_id}
+        response = self.api._send_request("browse", body)
+
+        # Try secondaryContents (twoColumnBrowseResultsRenderer format)
+        tcbr = response.get("contents", {}).get("twoColumnBrowseResultsRenderer", {})
+        sc = (
+            tcbr.get("secondaryContents", {})
+            .get("sectionListRenderer", {})
+            .get("contents", [])
+        )
+
+        items = []
+        for section in sc:
+            for rkey in ["musicPlaylistShelfRenderer", "musicShelfRenderer"]:
+                renderer = section.get(rkey, {})
+                if renderer:
+                    for raw_item in renderer.get("contents", []):
+                        cont = raw_item.get("continuationItemRenderer")
+                        if cont:
+                            token = (
+                                cont.get("continuationEndpoint", {})
+                                .get("continuationCommand", {})
+                                .get("token")
+                            )
+                            if token:
+                                items.extend(self._fetch_continuation(token))
+                        else:
+                            parsed = self._parse_channel_item(raw_item)
+                            if parsed:
+                                items.append(parsed)
+
+        # Fallback: try singleColumnBrowseResultsRenderer
+        if not items:
+            items = self._raw_parse_channel_content(browse_id, None)
+
+        # Get title from header
+        header = response.get("header", {})
+        for hkey in header:
+            h = header[hkey]
+            if isinstance(h, dict):
+                title_runs = h.get("title", {}).get("runs", [])
+                if title_runs:
+                    for item in items:
+                        item["_playlist_title"] = title_runs[0].get("text", "")
+                    break
+
+        return items
+
     def _raw_parse_channel_content(self, browse_id, params):
         """Parse channel content from raw API response when ytmusicapi can't."""
         body = {"browseId": browse_id}
@@ -654,14 +820,29 @@ class MusicClient:
             body["params"] = params
         response = self.api._send_request("browse", body)
 
-        tabs = response.get("contents", {}).get("singleColumnBrowseResultsRenderer", {}).get("tabs", [])
+        tabs = (
+            response.get("contents", {})
+            .get("singleColumnBrowseResultsRenderer", {})
+            .get("tabs", [])
+        )
         if not tabs:
             return []
 
-        sections = tabs[0].get("tabRenderer", {}).get("content", {}).get("sectionListRenderer", {}).get("contents", [])
+        sections = (
+            tabs[0]
+            .get("tabRenderer", {})
+            .get("content", {})
+            .get("sectionListRenderer", {})
+            .get("contents", [])
+        )
         items = []
         for section in sections:
-            for renderer_key in ["gridRenderer", "musicShelfRenderer", "musicPlaylistShelfRenderer", "musicCarouselShelfRenderer"]:
+            for renderer_key in [
+                "gridRenderer",
+                "musicShelfRenderer",
+                "musicPlaylistShelfRenderer",
+                "musicCarouselShelfRenderer",
+            ]:
                 renderer = section.get(renderer_key, {})
                 content_key = "items" if "items" in renderer else "contents"
                 for raw_item in renderer.get(content_key, []):
@@ -671,7 +852,11 @@ class MusicClient:
                     # Check for continuation token
                     cont = raw_item.get("continuationItemRenderer", {})
                     if cont:
-                        token = cont.get("continuationEndpoint", {}).get("continuationCommand", {}).get("token")
+                        token = (
+                            cont.get("continuationEndpoint", {})
+                            .get("continuationCommand", {})
+                            .get("token")
+                        )
                         if token:
                             items.extend(self._fetch_continuation(token))
         return items
@@ -694,7 +879,11 @@ class MusicClient:
                     for raw_item in cont_action.get("continuationItems", []):
                         cont_item = raw_item.get("continuationItemRenderer")
                         if cont_item:
-                            token = cont_item.get("continuationEndpoint", {}).get("continuationCommand", {}).get("token")
+                            token = (
+                                cont_item.get("continuationEndpoint", {})
+                                .get("continuationCommand", {})
+                                .get("token")
+                            )
                         else:
                             parsed = self._parse_channel_item(raw_item)
                             if parsed:
@@ -702,14 +891,24 @@ class MusicClient:
 
                 # Format 2: continuationContents (older format)
                 cont_contents = response.get("continuationContents", {})
-                for renderer_key in ["musicPlaylistShelfContinuation", "gridContinuation", "musicShelfContinuation"]:
+                for renderer_key in [
+                    "musicPlaylistShelfContinuation",
+                    "gridContinuation",
+                    "musicShelfContinuation",
+                ]:
                     renderer = cont_contents.get(renderer_key, {})
                     if not renderer:
                         continue
-                    for raw_item in renderer.get("contents", []) + renderer.get("items", []):
+                    for raw_item in renderer.get("contents", []) + renderer.get(
+                        "items", []
+                    ):
                         cont_item = raw_item.get("continuationItemRenderer")
                         if cont_item:
-                            token = cont_item.get("continuationEndpoint", {}).get("continuationCommand", {}).get("token")
+                            token = (
+                                cont_item.get("continuationEndpoint", {})
+                                .get("continuationCommand", {})
+                                .get("token")
+                            )
                         else:
                             parsed = self._parse_channel_item(raw_item)
                             if parsed:
@@ -725,12 +924,14 @@ class MusicClient:
             if not renderer:
                 continue
             result = {}
-            # Title — check both direct title.runs and flexColumns
+            # Title - check both direct title.runs and flexColumns
             title_runs = renderer.get("title", {}).get("runs", [])
             if not title_runs:
                 # flexColumns format (used in musicResponsiveListItemRenderer)
                 for col in renderer.get("flexColumns", []):
-                    col_renderer = col.get("musicResponsiveListItemFlexColumnRenderer", {})
+                    col_renderer = col.get(
+                        "musicResponsiveListItemFlexColumnRenderer", {}
+                    )
                     runs = col_renderer.get("text", {}).get("runs", [])
                     if runs and not result.get("title"):
                         title_runs = runs
@@ -753,10 +954,18 @@ class MusicClient:
                 runs = col_renderer.get("text", {}).get("runs", [])
                 artists = []
                 for r in runs:
-                    browse_nav = r.get("navigationEndpoint", {}).get("browseEndpoint", {})
+                    browse_nav = r.get("navigationEndpoint", {}).get(
+                        "browseEndpoint", {}
+                    )
                     if browse_nav.get("browseId"):
-                        artists.append({"name": r.get("text", ""), "id": browse_nav["browseId"]})
-                    elif r.get("text", "").strip() and r["text"].strip() not in ("•", "&", ","):
+                        artists.append(
+                            {"name": r.get("text", ""), "id": browse_nav["browseId"]}
+                        )
+                    elif r.get("text", "").strip() and r["text"].strip() not in (
+                        "•",
+                        "&",
+                        ",",
+                    ):
                         artists.append({"name": r["text"].strip()})
                 if artists:
                     result["artists"] = artists
@@ -767,22 +976,46 @@ class MusicClient:
                 col_renderer = col.get("musicResponsiveListItemFixedColumnRenderer", {})
                 runs = col_renderer.get("text", {}).get("runs", [])
                 if runs:
-                    result["duration"] = runs[0].get("text", "")
+                    dur_text = runs[0].get("text", "")
+                    result["duration"] = dur_text
+                    # Convert "M:SS" or "H:MM:SS" to seconds
+                    try:
+                        parts = dur_text.split(":")
+                        if len(parts) == 2:
+                            result["duration_seconds"] = int(parts[0]) * 60 + int(
+                                parts[1]
+                            )
+                        elif len(parts) == 3:
+                            result["duration_seconds"] = (
+                                int(parts[0]) * 3600
+                                + int(parts[1]) * 60
+                                + int(parts[2])
+                            )
+                    except (ValueError, IndexError):
+                        pass
                     break
 
             # Thumbnail
-            thumb_renderer = renderer.get("thumbnailRenderer", {}).get("musicThumbnailRenderer", {})
+            thumb_renderer = renderer.get("thumbnailRenderer", {}).get(
+                "musicThumbnailRenderer", {}
+            )
             if not thumb_renderer:
-                thumb_renderer = renderer.get("thumbnail", {}).get("musicThumbnailRenderer", {})
+                thumb_renderer = renderer.get("thumbnail", {}).get(
+                    "musicThumbnailRenderer", {}
+                )
             thumbs = thumb_renderer.get("thumbnail", {}).get("thumbnails", [])
             if thumbs:
                 result["thumbnails"] = thumbs
 
             # VideoId from overlay play button (fallback if not from title)
             if not result.get("videoId"):
-                overlay = renderer.get("overlay", {}).get("musicItemThumbnailOverlayRenderer", {})
+                overlay = renderer.get("overlay", {}).get(
+                    "musicItemThumbnailOverlayRenderer", {}
+                )
                 play_btn = overlay.get("content", {}).get("musicPlayButtonRenderer", {})
-                watch_ep = play_btn.get("playNavigationEndpoint", {}).get("watchEndpoint", {})
+                watch_ep = play_btn.get("playNavigationEndpoint", {}).get(
+                    "watchEndpoint", {}
+                )
                 if watch_ep.get("videoId"):
                     result["videoId"] = watch_ep["videoId"]
                     result["playlistId"] = watch_ep.get("playlistId", "")
@@ -844,109 +1077,201 @@ class MusicClient:
         if not self.api:
             return []
         try:
-            response = self.api._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": params})
-            
+            response = self.api._send_request(
+                "browse",
+                {"browseId": "FEmusic_moods_and_genres_category", "params": params},
+            )
+
             sections = []
-            if 'contents' in response and 'singleColumnBrowseResultsRenderer' in response['contents']:
-                tabs = response['contents']['singleColumnBrowseResultsRenderer']['tabs']
-                results = tabs[0]['tabRenderer']['content']['sectionListRenderer']['contents']
-                
+            if (
+                "contents" in response
+                and "singleColumnBrowseResultsRenderer" in response["contents"]
+            ):
+                tabs = response["contents"]["singleColumnBrowseResultsRenderer"]["tabs"]
+                results = tabs[0]["tabRenderer"]["content"]["sectionListRenderer"][
+                    "contents"
+                ]
+
                 for section in results:
-                    if 'musicCarouselShelfRenderer' in section:
-                        carousel = section['musicCarouselShelfRenderer']
-                        title = carousel['header']['musicCarouselShelfBasicHeaderRenderer']['title']['runs'][0]['text']
-                        contents = carousel['contents']
-                        
+                    if "musicCarouselShelfRenderer" in section:
+                        carousel = section["musicCarouselShelfRenderer"]
+                        title = carousel["header"][
+                            "musicCarouselShelfBasicHeaderRenderer"
+                        ]["title"]["runs"][0]["text"]
+                        contents = carousel["contents"]
+
                         parsed_items = []
                         for item in contents:
                             try:
                                 data = {}
-                                if 'musicResponsiveListItemRenderer' in item:
-                                    renderer = item['musicResponsiveListItemRenderer']
-                                    runs = renderer['flexColumns'][0]['musicResponsiveListItemFlexColumnRenderer']['text']['runs']
-                                    data['title'] = runs[0]['text']
-                                    
-                                    if 'navigationEndpoint' in renderer:
-                                        ep = renderer['navigationEndpoint']
-                                        if 'watchEndpoint' in ep:
-                                            data['videoId'] = ep['watchEndpoint']['videoId']
-                                        elif 'browseEndpoint' in ep:
-                                            data['browseId'] = ep['browseEndpoint']['browseId']
-                                    elif 'navigationEndpoint' in runs[0]:
-                                        ep = runs[0]['navigationEndpoint']
-                                        if 'watchEndpoint' in ep:
-                                            data['videoId'] = ep['watchEndpoint']['videoId']
-                                        elif 'browseEndpoint' in ep:
-                                            data['browseId'] = ep['browseEndpoint']['browseId']
-                                            
-                                    if 'thumbnail' in renderer:
-                                        data['thumbnails'] = renderer['thumbnail']['musicThumbnailRenderer']['thumbnail']['thumbnails']
-                                        
-                                    if len(renderer['flexColumns']) > 1:
-                                        sub_runs = renderer['flexColumns'][1]['musicResponsiveListItemFlexColumnRenderer']['text']['runs']
+                                if "musicResponsiveListItemRenderer" in item:
+                                    renderer = item["musicResponsiveListItemRenderer"]
+                                    runs = renderer["flexColumns"][0][
+                                        "musicResponsiveListItemFlexColumnRenderer"
+                                    ]["text"]["runs"]
+                                    data["title"] = runs[0]["text"]
+
+                                    if "navigationEndpoint" in renderer:
+                                        ep = renderer["navigationEndpoint"]
+                                        if "watchEndpoint" in ep:
+                                            data["videoId"] = ep["watchEndpoint"][
+                                                "videoId"
+                                            ]
+                                        elif "browseEndpoint" in ep:
+                                            data["browseId"] = ep["browseEndpoint"][
+                                                "browseId"
+                                            ]
+                                    elif "navigationEndpoint" in runs[0]:
+                                        ep = runs[0]["navigationEndpoint"]
+                                        if "watchEndpoint" in ep:
+                                            data["videoId"] = ep["watchEndpoint"][
+                                                "videoId"
+                                            ]
+                                        elif "browseEndpoint" in ep:
+                                            data["browseId"] = ep["browseEndpoint"][
+                                                "browseId"
+                                            ]
+
+                                    if "thumbnail" in renderer:
+                                        data["thumbnails"] = renderer["thumbnail"][
+                                            "musicThumbnailRenderer"
+                                        ]["thumbnail"]["thumbnails"]
+
+                                    if len(renderer["flexColumns"]) > 1:
+                                        sub_runs = renderer["flexColumns"][1][
+                                            "musicResponsiveListItemFlexColumnRenderer"
+                                        ]["text"]["runs"]
                                         artists = []
                                         for r in sub_runs:
-                                            if 'navigationEndpoint' in r and 'browseEndpoint' in r['navigationEndpoint']:
-                                                if 'browseEndpointContextSupportedConfigs' in r['navigationEndpoint']['browseEndpoint']:
-                                                    if r['navigationEndpoint']['browseEndpoint']['browseEndpointContextSupportedConfigs']['browseEndpointContextMusicConfig']['pageType'] == 'MUSIC_PAGE_TYPE_ARTIST':
-                                                        artists.append({"name": r['text'], "id": r['navigationEndpoint']['browseEndpoint']['browseId']})
-                                        data['artists'] = artists
-                                    
-                                elif 'musicTwoRowItemRenderer' in item:
-                                    renderer = item['musicTwoRowItemRenderer']
-                                    runs = renderer['title']['runs']
-                                    data['title'] = runs[0]['text']
-                                    
-                                    if 'navigationEndpoint' in renderer:
-                                        ep = renderer['navigationEndpoint']
-                                        if 'watchEndpoint' in ep:
-                                            data['videoId'] = ep['watchEndpoint']['videoId']
-                                        elif 'browseEndpoint' in ep:
-                                            data['browseId'] = ep['browseEndpoint']['browseId']
-                                    elif 'navigationEndpoint' in runs[0]:
-                                        ep = runs[0]['navigationEndpoint']
-                                        if 'watchEndpoint' in ep:
-                                            data['videoId'] = ep['watchEndpoint']['videoId']
-                                        elif 'browseEndpoint' in ep:
-                                            data['browseId'] = ep['browseEndpoint']['browseId']
-                                            
-                                    if 'thumbnailRenderer' in renderer and 'musicThumbnailRenderer' in renderer['thumbnailRenderer']:
-                                        data['thumbnails'] = renderer['thumbnailRenderer']['musicThumbnailRenderer']['thumbnail']['thumbnails']
-                                        
-                                    if 'subtitle' in renderer and 'runs' in renderer['subtitle']:
-                                        sub_runs = renderer['subtitle']['runs']
+                                            if (
+                                                "navigationEndpoint" in r
+                                                and "browseEndpoint"
+                                                in r["navigationEndpoint"]
+                                            ):
+                                                if (
+                                                    "browseEndpointContextSupportedConfigs"
+                                                    in r["navigationEndpoint"][
+                                                        "browseEndpoint"
+                                                    ]
+                                                ):
+                                                    if (
+                                                        r["navigationEndpoint"][
+                                                            "browseEndpoint"
+                                                        ][
+                                                            "browseEndpointContextSupportedConfigs"
+                                                        ][
+                                                            "browseEndpointContextMusicConfig"
+                                                        ]["pageType"]
+                                                        == "MUSIC_PAGE_TYPE_ARTIST"
+                                                    ):
+                                                        artists.append(
+                                                            {
+                                                                "name": r["text"],
+                                                                "id": r[
+                                                                    "navigationEndpoint"
+                                                                ]["browseEndpoint"][
+                                                                    "browseId"
+                                                                ],
+                                                            }
+                                                        )
+                                        data["artists"] = artists
+
+                                elif "musicTwoRowItemRenderer" in item:
+                                    renderer = item["musicTwoRowItemRenderer"]
+                                    runs = renderer["title"]["runs"]
+                                    data["title"] = runs[0]["text"]
+
+                                    if "navigationEndpoint" in renderer:
+                                        ep = renderer["navigationEndpoint"]
+                                        if "watchEndpoint" in ep:
+                                            data["videoId"] = ep["watchEndpoint"][
+                                                "videoId"
+                                            ]
+                                        elif "browseEndpoint" in ep:
+                                            data["browseId"] = ep["browseEndpoint"][
+                                                "browseId"
+                                            ]
+                                    elif "navigationEndpoint" in runs[0]:
+                                        ep = runs[0]["navigationEndpoint"]
+                                        if "watchEndpoint" in ep:
+                                            data["videoId"] = ep["watchEndpoint"][
+                                                "videoId"
+                                            ]
+                                        elif "browseEndpoint" in ep:
+                                            data["browseId"] = ep["browseEndpoint"][
+                                                "browseId"
+                                            ]
+
+                                    if (
+                                        "thumbnailRenderer" in renderer
+                                        and "musicThumbnailRenderer"
+                                        in renderer["thumbnailRenderer"]
+                                    ):
+                                        data["thumbnails"] = renderer[
+                                            "thumbnailRenderer"
+                                        ]["musicThumbnailRenderer"]["thumbnail"][
+                                            "thumbnails"
+                                        ]
+
+                                    if (
+                                        "subtitle" in renderer
+                                        and "runs" in renderer["subtitle"]
+                                    ):
+                                        sub_runs = renderer["subtitle"]["runs"]
                                         artists = []
                                         year = None
                                         type_ = None
                                         for r in sub_runs:
-                                            if 'navigationEndpoint' in r and 'browseEndpoint' in r['navigationEndpoint']:
-                                                ep = r['navigationEndpoint']['browseEndpoint']
-                                                if 'browseEndpointContextSupportedConfigs' in ep:
-                                                    pt = ep['browseEndpointContextSupportedConfigs']['browseEndpointContextMusicConfig']['pageType']
-                                                    if pt == 'MUSIC_PAGE_TYPE_ARTIST':
-                                                        artists.append({"name": r['text'], "id": ep['browseId']})
-                                            elif 'text' in r and r['text'].strip() != '•':
-                                                txt = r['text'].strip()
+                                            if (
+                                                "navigationEndpoint" in r
+                                                and "browseEndpoint"
+                                                in r["navigationEndpoint"]
+                                            ):
+                                                ep = r["navigationEndpoint"][
+                                                    "browseEndpoint"
+                                                ]
+                                                if (
+                                                    "browseEndpointContextSupportedConfigs"
+                                                    in ep
+                                                ):
+                                                    pt = ep[
+                                                        "browseEndpointContextSupportedConfigs"
+                                                    ][
+                                                        "browseEndpointContextMusicConfig"
+                                                    ]["pageType"]
+                                                    if pt == "MUSIC_PAGE_TYPE_ARTIST":
+                                                        artists.append(
+                                                            {
+                                                                "name": r["text"],
+                                                                "id": ep["browseId"],
+                                                            }
+                                                        )
+                                            elif (
+                                                "text" in r and r["text"].strip() != "•"
+                                            ):
+                                                txt = r["text"].strip()
                                                 if txt.isdigit() and len(txt) == 4:
                                                     year = txt
-                                                elif txt in ['Album', 'Single', 'EP', 'Playlist']:
+                                                elif txt in [
+                                                    "Album",
+                                                    "Single",
+                                                    "EP",
+                                                    "Playlist",
+                                                ]:
                                                     type_ = txt
-                                        data['artists'] = artists
+                                        data["artists"] = artists
                                         if year:
-                                            data['year'] = year
+                                            data["year"] = year
                                         if type_:
-                                            data['type'] = type_
-                                
+                                            data["type"] = type_
+
                                 if data:
                                     parsed_items.append(data)
                             except Exception as e:
                                 print("Error parsing item in category page:", e)
-                                
+
                         if parsed_items:
-                            sections.append({
-                                "title": title,
-                                "items": parsed_items
-                            })
+                            sections.append({"title": title, "items": parsed_items})
             return sections
         except Exception as e:
             print(f"Error fetching category page: {e}")
@@ -1222,6 +1547,7 @@ class MusicClient:
             headers_upload.pop("Content-Encoding", None)
 
             import urllib.request
+
             req = urllib.request.Request(
                 upload_url,
                 data=img_data,
@@ -1236,9 +1562,12 @@ class MusicClient:
             print(f"DEBUG STEP2: body={upload_body[:500]}")
 
             if not upload_body.strip():
-                raise Exception(f"Upload returned empty response. Status={upload_status}")
+                raise Exception(
+                    f"Upload returned empty response. Status={upload_status}"
+                )
 
             import json as _json
+
             blob_data = _json.loads(upload_body)
             blob_id = blob_data.get("encryptedBlobId")
 

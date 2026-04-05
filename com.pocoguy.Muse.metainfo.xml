@@ -79,6 +79,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2026-05-04.0" date="2026-05-04">
+      <description>
+        <p>This update adds the ability to download songs as local files with all the metadata and offline listening, as well as Charts in the Explore page.</p>
+      </description>
+    </release>
     <release version="2026-04-04.0" date="2026-04-04">
       <description>
         <p>Major feature update with library management, uploads, and performance improvements.</p>

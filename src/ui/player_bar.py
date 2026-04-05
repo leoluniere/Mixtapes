@@ -67,7 +67,7 @@ class PlayerBar(Gtk.Box):
         meta_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         meta_box.set_valign(Gtk.Align.CENTER)
         meta_box.set_hexpand(True)
-        meta_box.set_margin_top(0) # Added as per instruction
+        meta_box.set_margin_top(0)  # Added as per instruction
 
         self.title_label = Gtk.Label(label="Not Playing")
         self.title_label.set_halign(Gtk.Align.START)
@@ -84,8 +84,8 @@ class PlayerBar(Gtk.Box):
 
         self.artist_label = Gtk.Label(label="")
         self.artist_label.set_ellipsize(3)  # END
-        self.artist_label.set_width_chars(1) # Allow shrinking fully
-        self.artist_label.set_max_width_chars(22) # Reverted to 22 (less aggressive)
+        self.artist_label.set_width_chars(1)  # Allow shrinking fully
+        self.artist_label.set_max_width_chars(22)  # Reverted to 22 (less aggressive)
         self.artist_label.add_css_class("caption")
 
         self.artist_btn.set_child(self.artist_label)
@@ -412,7 +412,7 @@ class PlayerBar(Gtk.Box):
             self._is_buffering_spinner = True
         elif state == "playing":
             if self.player.duration <= 0:
-                # Buffering — show spinner until we have a valid duration
+                # Buffering - show spinner until we have a valid duration
                 self._is_buffering_spinner = True
                 self._play_stack.set_visible_child_name("spinner")
                 self.play_btn.set_sensitive(False)
@@ -425,7 +425,7 @@ class PlayerBar(Gtk.Box):
                 self.play_btn.set_sensitive(True)
         elif state in ("paused", "stopped"):
             if self._is_buffering_spinner and self.player.duration <= 0:
-                # Still buffering—keep spinner visible
+                # Still buffering-keep spinner visible
 
                 return
             if state == "paused":
@@ -464,7 +464,7 @@ class PlayerBar(Gtk.Box):
         self.player.set_mute(is_muted)
 
     def on_volume_scale_changed(self, scale):
-        if getattr(self, '_updating_volume', False):
+        if getattr(self, "_updating_volume", False):
             return
         self.player.set_volume(scale.get_value())
 
