@@ -21,6 +21,7 @@ finish-args:
   - --persist=.
   - --device=dri
   - --socket=session-bus
+  - --filesystem=xdg-music
 modules:
   - name: nodejs-runtime
     buildsystem: simple
