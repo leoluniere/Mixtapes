@@ -44,8 +44,7 @@ jobs:
 
       - name: Compile GResources
         run: |
-          cd src
-          glib-compile-resources muse.gresource.xml
+          glib-compile-resources --sourcedir=. src/muse.gresource.xml --target=src/muse.gresource
 
       - name: Smoke test - verify imports work
         run: |
