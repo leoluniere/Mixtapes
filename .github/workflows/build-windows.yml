@@ -80,6 +80,61 @@ jobs:
           print('App module imports successful!')
           "
 
+      - name: Bundle application
+        run: |
+          mkdir -p dist/mixtapes
+
+          # Copy app source
+          cp -r src dist/mixtapes/
+          cp requirements-windows.txt dist/mixtapes/
+          cp start.bat dist/mixtapes/
+          cp -r assets dist/mixtapes/
+
+          # Copy MSYS2 runtime (GTK4, Libadwaita, GStreamer, Python, etc.)
+          MSYS_PREFIX="/$MSYSTEM/bin"
+          MSYS_SHARE="/$MSYSTEM/share"
+          MSYS_LIB="/$MSYSTEM/lib"
+
+          # Binaries and DLLs
+          mkdir -p dist/mixtapes/runtime/bin
+          cp $MSYS_PREFIX/*.dll dist/mixtapes/runtime/bin/
+          cp $MSYS_PREFIX/python*.exe dist/mixtapes/runtime/bin/
+          cp $MSYS_PREFIX/glib-compile-schemas.exe dist/mixtapes/runtime/bin/ || true
+          cp $MSYS_PREFIX/gdbus.exe dist/mixtapes/runtime/bin/ || true
+          cp $MSYS_PREFIX/node.exe dist/mixtapes/runtime/bin/ || true
+
+          # GLib schemas
+          mkdir -p dist/mixtapes/runtime/share/glib-2.0/schemas
+          cp $MSYS_SHARE/glib-2.0/schemas/gschemas.compiled dist/mixtapes/runtime/share/glib-2.0/schemas/ || true
+          cp $MSYS_SHARE/glib-2.0/schemas/*.xml dist/mixtapes/runtime/share/glib-2.0/schemas/ || true
+
+          # Icons (Adwaita)
+          cp -r $MSYS_SHARE/icons dist/mixtapes/runtime/share/ || true
+
+          # GStreamer plugins
+          mkdir -p dist/mixtapes/runtime/lib/gstreamer-1.0
+          cp $MSYS_LIB/gstreamer-1.0/*.dll dist/mixtapes/runtime/lib/gstreamer-1.0/
+
+          # Python site-packages (pip-installed deps)
+          PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          cp -r $MSYS_LIB/python${PYTHON_VER}/site-packages dist/mixtapes/runtime/site-packages
+
+          # GI typelibs
+          mkdir -p dist/mixtapes/runtime/lib/girepository-1.0
+          cp $MSYS_LIB/girepository-1.0/*.typelib dist/mixtapes/runtime/lib/girepository-1.0/
+
+          # Create launcher script
+          printf '@echo off\r\nset MYDIR=%%~dp0\r\nset PATH=%%MYDIR%%runtime\\bin;%%PATH%%\r\nset GI_TYPELIB_PATH=%%MYDIR%%runtime\\lib\\girepository-1.0\r\nset GST_PLUGIN_PATH=%%MYDIR%%runtime\\lib\\gstreamer-1.0\r\nset GSETTINGS_SCHEMA_DIR=%%MYDIR%%runtime\\share\\glib-2.0\\schemas\r\nset XDG_DATA_DIRS=%%MYDIR%%runtime\\share\r\nset PYTHONPATH=%%MYDIR%%runtime\\site-packages;%%MYDIR%%src\r\n"%%MYDIR%%runtime\\bin\\python3.exe" "%%MYDIR%%src\\main.py" %%*\r\n' > dist/mixtapes/mixtapes.bat
+
+          echo "Bundle size:"
+          du -sh dist/mixtapes
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixtapes-windows-x86_64
+          path: dist/mixtapes/
+
       - name: Upload MSYS2 environment info
         if: always()
         run: |
