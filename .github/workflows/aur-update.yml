@@ -16,10 +16,8 @@ jobs:
       - name: Update pkgver in PKGBUILD
         run: |
           cd aur-package
-          # Get count and short hash from git
-          COUNT=$(git rev-list --count HEAD)
-          HASH=$(git rev-parse --short HEAD)
-          NEW_VER="r$COUNT.$HASH"
+          # Get version from metainfo XML (latest release)
+          NEW_VER=$(grep -oP '(?<=<release version=")[^"]+' ../com.pocoguy.Muse.metainfo.xml | head -1)
           # Update pkgver in PKGBUILD
           sed -i "s/^pkgver=.*/pkgver=$NEW_VER/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD

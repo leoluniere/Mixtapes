@@ -1,4 +1,4 @@
-<picture align="left" alt="Project logo">
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/omori-mixtape-dark.png" />
   <source media="(prefers-color-scheme: light)" srcset="screenshots/omori-mixtape.png" />
   <img align="left" height="150" src="screenshots/omori-mixtape.png" />
@@ -6,27 +6,226 @@
 
 # Mixtapes
 
-A modern, Linux-first YouTube Music player.
+A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 <br><small>formerly known as Muse</small>
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/issues)
+[![AUR](https://img.shields.io/aur/version/mixtapes-git)](https://aur.archlinux.org/packages/mixtapes-git)
+[![Flatpak CI](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-flatpak.yml)
+
+<br clear="both"/>
+
 > [!NOTE]
-> This software is considered in alpha stage. Expect bugs and a lot of missing features.
-> It is also not affiliated with, funded, authorized, endorsed, or in any way associated with YouTube, Google LLC or any of their affiliates and subsidiaries.
-> Help is always appreciated, so feel free to open an issue or a pull request.
+> This software is in alpha. Expect bugs and missing features.
+> It is not affiliated with, funded, authorized, endorsed, or in any way associated with YouTube, Google LLC or any of their affiliates and subsidiaries.
+> Help is always appreciated -- feel free to open an issue or a pull request!
+
+---
 
 <div align="center">
   <img src="screenshots/1.png" width="49%" /> <img src="screenshots/2.png" width="49%" />
   <img src="screenshots/3.png" width="49%" /> <img src="screenshots/4.png" width="49%" />
-
   <br/>
-
-<img src="screenshots/5.png" width="24%" /> <img src="screenshots/6.png" width="24%" /> <img src="screenshots/7.png" width="24%" /> <img src="screenshots/8.png" width="24%" />
-
+  <img src="screenshots/5.png" width="24%" /> <img src="screenshots/6.png" width="24%" /> <img src="screenshots/7.png" width="24%" /> <img src="screenshots/8.png" width="24%" />
 </div>
 
-## Star History
+---
 
-Thank you for all of your positive feedback on Mixtapes, I appreciate it a lot!
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Authentication](#authentication)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Star History](#star-history)
+- [Contributors](#contributors)
+- [License](#license)
+
+## Features
+
+- **YouTube Music Integration** -- Connect with your account and access your full library
+- **Library Access** -- Playlists, liked songs, artists, albums, and uploads
+- **Search & Discovery** -- New releases, moods & moments, genres, trending, and charts
+- **Full Playback Control** -- Play/pause, seeking, queue management, shuffle, repeat modes
+- **Downloads** -- Download tracks for offline playback as local files
+- **MPRIS Support** -- Control playback from system media controls
+- **Radio & Mixes** -- Start a radio station from any song or artist
+- **Background Playback** -- Music keeps playing when the window is closed
+- **Playlist Editing** -- Reorder, multi-select edit, change covers, visibility, and metadata
+- **Caching** -- Cached data for snappy performance
+- **Responsive UI** -- Adaptive layout built with Libadwaita
+
+## Installation
+
+### Flatpak (Recommended)
+
+Add the automated repository and install:
+
+```bash
+flatpak remote-add --user --if-not-exists mixtapes https://m-obeid.github.io/Mixtapes/mixtapes.flatpakrepo
+flatpak install --user mixtapes com.pocoguy.Muse
+```
+
+> [!NOTE]
+> If you previously installed under the old "Muse" repository name, remove the old remote first:
+> `flatpak remote-delete --user mixtapes`
+
+<details>
+<summary>Offline bundle install</summary>
+
+Download the latest artifact from [GitHub Actions](https://github.com/m-obeid/Mixtapes/actions), then:
+
+```bash
+unzip Mixtapes-x86_64-flatpak.zip
+flatpak install --user ./Mixtapes-x86_64.flatpak
+```
+
+Both `x86_64` and `aarch64` builds are available.
+
+</details>
+
+### AUR (Arch Linux)
+
+```bash
+yay -S mixtapes-git
+```
+
+### Nix
+
+A Nix flake is available. See [setup instructions](https://github.com/m-obeid/Muse/pull/2#issue-3965386248).
+
+### From Source
+
+<details>
+<summary>Install dependencies for your distro</summary>
+
+**Arch Linux:**
+```bash
+sudo pacman -S git python-pip nodejs gtk4 libadwaita webkitgtk-6.0 gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly
+```
+
+**Fedora:**
+```bash
+sudo dnf install git python3 python3-pip nodejs gtk4-devel adwaita-gtk4-devel webkitgtk6.0-devel gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad gstreamer1-plugins-ugly
+```
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install git python3 python3-pip nodejs libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+```
+
+> [!NOTE]
+> On Debian/Ubuntu, consider using the Flatpak install to avoid outdated packages.
+
+</details>
+
+```bash
+git clone https://github.com/m-obeid/Mixtapes.git
+cd Mixtapes
+python3 -m venv .venv --system-site-packages
+source .venv/bin/activate
+pip install -r requirements.txt
+chmod +x start.sh
+./start.sh
+```
+
+To update:
+
+```bash
+git pull
+pip install -r requirements.txt
+```
+
+<details>
+<summary>Build with flatpak-builder</summary>
+
+```bash
+flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.node24//24.08
+git clone https://github.com/m-obeid/Mixtapes.git && cd Mixtapes
+flatpak-builder --user --install --force-clean build-dir com.pocoguy.Muse.yaml
+flatpak run com.pocoguy.Muse
+```
+
+</details>
+
+### Prerequisites
+
+| Dependency | Purpose |
+|---|---|
+| Python 3.10+ | Core runtime |
+| Node.js | Required for yt-dlp-ejs (fixes playback issues) |
+| GTK4 + dev headers | UI toolkit |
+| Libadwaita + dev headers | GNOME UI components |
+| WebKitGTK 6.0 + dev headers | Embedded browser for auth |
+| GStreamer plugins (base, good, bad, ugly) | Audio playback |
+
+## Authentication
+
+> [!TIP]
+> You can authenticate directly in the app using the built-in WebKit browser -- no manual setup needed!
+
+<details>
+<summary>Manual authentication (legacy)</summary>
+
+This app uses `ytmusicapi` for backend data. Authentication gives access to your library and higher quality streams.
+
+1. Run: `ytmusicapi browser`
+2. Follow instructions to log in via your browser and paste the headers. Use a private browser profile so you don't get logged out.
+3. The output will be saved as `browser.json`.
+
+**Flatpak users:** Open YouTube Music in your browser, copy request headers as described in the [ytmusicapi docs](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html), then:
+
+```bash
+flatpak run --command=sh com.pocoguy.Muse
+mkdir -p ~/data/Muse && cd ~/data/Muse && ytmusicapi browser
+```
+
+Paste the headers and press `Ctrl-D`.
+
+Without a `browser.json` file, the app falls back to the unauthenticated API, which may cause playback issues.
+
+</details>
+
+## Roadmap
+
+✅️ = implemented · ☑️ = partially implemented · 🔜 = planned · ❎️ = unlikely
+
+| Status | Feature | Details |
+|:---:|---|---|
+| ✅️ | **Authentication** | Connect to YouTube Music (Browser cookies) |
+| ✅️ | **Library** | ✅️ Playlists<br>✅️ Liked songs<br>✅️ Artists<br>✅️ Albums<br>✅️ Uploads |
+| ✅️ | **Search** | Search for songs, albums, and artists |
+| ☑️ | **Exploration** | ✅️ New Releases<br>✅️ Moods & Moments<br>✅️ Genres<br>✅️ Trending<br>✅️ Charts<br>🔜 Home Page |
+| ✅️ | **Artist Page** | ✅️ Basic info<br>✅️ Related artists<br>✅️ Top tracks<br>✅️ Albums<br>✅️ Singles/EPs<br>✅️ Videos<br>✅️ Play<br>✅️ Shuffle<br>✅️ Subscribe/Unsubscribe |
+| ✅️ | **Playlist Page** | ✅️ Info<br>✅️ Tracks<br>✅️ Play<br>✅️ Shuffle<br>✅️ Order<br>✅️ Multi-Selection Editing<br>✅️ Cover Change<br>✅️ Change Visibility<br>✅️ Change Description<br>✅️ Change Name |
+| ✅️ | **Album Page** | ✅️ Basic info<br>✅️ Tracks<br>✅️ Play<br>✅️ Shuffle |
+| ✅️ | **Player** | ✅️ Play/Pause<br>✅️ Seeking<br>✅️ Volume<br>✅️ Queue (Previous/Next, Reorder, Shuffle, Repeat modes) |
+| ✅️ | **Caching** | Cache data to reduce latency |
+| ☑️ | **Responsive Design** | Mobile-friendly layout with adaptive UI |
+| ✅️ | **MPRIS Support** | Control playback from system media controls |
+| ✅️ | **Download Support** | Download tracks for offline playback, even as local files |
+| ✅️ | **Radio / Mixes** | Start a radio station from a song or artist |
+| ✅️ | **Dedicated Data Directory** | Cookies, cache, etc. in a dedicated directory |
+| ✅️ | **Background Playback** | Music keeps playing when the window is closed |
+| ✅️ | **AUR** | Available as `mixtapes-git` |
+| ☑️ | **Flatpak** | ✅️ Flatpak build<br>☑️ Flathub release (depends on app icon)<br>🔜 App icon |
+| ☑️ | **Settings** | Configure app preferences (theme, audio quality, etc.). Not much to configure yet. |
+| 🔜 | **Cover Art Tint** | Tint Libadwaita to match cover art, kinda like Material You |
+| 🔜 | **Discord RPC** | Show your current track on Discord |
+| 🔜 | **Lyrics** | Synchronized lyrics, maybe using BetterLyrics API |
+| 🔜 | **Windows/macOS** | Requires quite a bit of tinkering, not highest priority |
+| 🔜 | **GNOME Circle** | Still considering it, might not happen |
+
+Have an idea or found a bug? [Open an issue!](https://github.com/m-obeid/Mixtapes/issues)
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues for bug reports or feature requests, and submit pull requests.
+
+## Star History
 
 <a href="https://www.star-history.com/?repos=m-obeid%2FMixtapes&type=date&legend=top-left">
  <picture>
@@ -36,253 +235,12 @@ Thank you for all of your positive feedback on Mixtapes, I appreciate it a lot!
  </picture>
 </a>
 
-## Thanks to all contributors as well!
+## Contributors
 
-<a href = "https://github.com/m-obeid/Mixtapes/graphs/contributors">
-<img src = "https://contrib.rocks/image?repo=m-obeid/Mixtapes" width="600"/>
+<a href="https://github.com/m-obeid/Mixtapes/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=m-obeid/Mixtapes" width="600"/>
 </a>
-
-
-## Roadmap
-
-This is a list of all the features that are planned for Mixtapes:
-
-✅️ means the feature is implemented.
-
-☑️ means the feature is partially implemented.
-
-🔜 means the feature is not implemented yet, but planned.
-
-❎️ means the feature will likely not be implemented.
-
-- ✅️ **Authentication**: Connect to YouTube Music (Browser cookies).
-- ✅️ **Library**: Access your playlists and liked songs.
-  - ✅️ Playlists
-  - ✅️ Liked songs
-  - ✅️ Artists
-  - ✅️ Albums
-  - ✅️ Uploads
-- ✅️ **Search**: Search for songs, albums, and artists.
-- ☑️ **Exploration**: Ways to discover new music.
-  - ✅️ New Releases
-  - ✅️ Moods & Moments
-  - ✅️ Genres
-  - ✅️ Trending
-  - ✅️ Charts
-  - 🔜 Home Page
-- ✅️ **Artist Page**: View artist details and discography.
-  - ✅️ Basic artist info.
-  - ✅️ Artist related artists.
-  - ✅️ Artist top tracks.
-  - ✅️ Artist albums.
-  - ✅️ Artist singles/EPs.
-  - ✅️ Artist videos.
-  - ✅️ Artist Play button
-  - ✅️ Artist Shuffle button
-  - ✅️ Artist Subscribe/Unsubscribe button
-- ✅️ **Playlist Page**: View and play playlists.
-  - ✅️ Basic playlist info.
-  - ✅️ Playlist tracks.
-  - ✅️ Playlist Play button
-  - ✅️ Playlist Shuffle button
-  - ✅️ Playlist Order
-  - ✅️ Playlist Multi-Selection Editing
-  - ✅️ Playlist Cover Change
-  - ✅️ Playlist Change Visibility
-  - ✅️ Playlist Change Description
-  - ✅️ Playlist Change Name
-- ✅️ **Album Page**: View and play albums.
-  - ✅️ Basic album info.
-  - ✅️ Album tracks.
-  - ✅️ Album Play button
-  - ✅️ Album Shuffle button
-- ✅️ **Player**: Full playback control with queue management.
-  - ✅️ Play/Pause
-  - ✅️ Seeking
-  - ✅️ Queue
-    - ✅️ Previous/Next
-    - ✅️ Change order of song
-    - ✅️ Shuffle
-    - ✅️ Repeat modes (single track, loop queue)
-  - ✅️ Volume control
-- ✅️ **Caching**: Cache data to reduce latency.
-- ☑️ **Responsive Design**: Mobile-friendly layout with adaptive UI.
-- ✅️ **MPRIS Support**: Control playback from system media controls.
-- 🔜 **Cover Art Tint**: Tint libadwaita to match the cover art of the current song, kinda like Material You.
-- 🔜 **Discord RPC**: Show your current track on Discord.
-- 🔜 **Lyrics**: View synchronized lyrics, maybe even using BetterLyrics API.
-- ☑️ **Settings**: Configure app preferences (theme, audio quality, etc.).
-  > There isn't much to configure yet.
-- ✅️ **Download Support**: Download tracks for offline playback, even as local files.
-- ✅️ **Radio / Mixes**: Start a radio station from a song or artist.
-- 🔜 **Windows/macOS**: Builds for macOS and Windows
-  > Requires quite a bit of tinkering, not my highest priority
-- ✅️ **Dedicated Data Directory**: Move all the data like cookies, cache, etc. to a dedicated directory instead of the project root directory.
-- ✅️ **Background Playback**: Play music in the background, even when the main window is closed.
-- ☑️ **Flatpak**: Package Mixtapes as a Flatpak.
-  - ✅️ Flatpak build
-  - ☑️ Flathub release
-    > Depends on App icon.
-  - 🔜 App icon
-- 🔜 **GNOME Circle**: Maybe get Mixtapes on GNOME Circle?
-  > Still considering it, might not happen.
-- ✅️ **AUR**: Package Mixtapes as an AUR package.
-
-If you got any more ideas or bug reports, feel free to open an issue.
-
-## Prerequisites
-
-- Python 3.10 or higher
-- Node.js (needed for yt-dlp-ejs, helps with playback issues)
-- GTK4 (including development headers)
-- Libadwaita (including development headers)
-- WebKitGTK 6.0 (including development headers)
-- GStreamer plugins (base, good, bad, ugly)
-
-## Installation
-
-Currently, there are 4 options for installing Mixtapes:
-
-- AUR
-- From Source
-- Using a Nix flake
-- GitHub Actions (Flatpak)
-- Using flatpak-builder
-
-### AUR
-
-If you are using Arch Linux, you can install Mixtapes from the AUR.
-An AUR helper like `yay` or `paru` is recommended.
-
-```bash
-yay -S mixtapes-git
-```
-
-### From Source
-
-Before you start, make sure to install the dependencies.
-
-Here are install commands for some common package managers:
-
-- Arch Linux: `sudo pacman -S git python-pip nodejs gtk4 libadwaita webkitgtk-6.0 gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly`
-
-- Debian/Ubuntu: `sudo apt install git python3 python3-pip nodejs libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly`
-
-> [!NOTE]
-> If you are on Debian/Ubuntu, you should probably use Flatpak to avoid outdated packages.
-
-- Fedora: `sudo dnf install git python3 python3-pip nodejs gtk4-devel adwaita-gtk4-devel webkitgtk6.0-devel gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad gstreamer1-plugins-ugly`
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/m-obeid/Mixtapes.git
-   cd Mixtapes
-   ```
-
-2. Install Python dependencies within a virtual environment:
-
-   ```bash
-   python3 -m venv .venv --system-site-packages
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   chmod +x start.sh
-   ```
-
-3. Run the app:
-   ```bash
-   ./start.sh
-   ```
-
-To pull the latest changes:
-
-```bash
-git pull
-pip install -r requirements.txt
-```
-
-### Nix
-
-A Nix flake is available for NixOS or Nix Package Manager users.
-See [here](https://github.com/m-obeid/Muse/pull/2#issue-3965386248)
-
-### GitHub Actions (Pre-built Binaries)
-
-Automated builds for Flatpak are available for every change made to the repository. These support both `x86_64` (amd64) and `aarch64` architectures.
-
-1. Go to the [Actions tab](https://github.com/m-obeid/Muse/actions) on GitHub.
-2. Select the latest successful build for "Build Flatpak".
-3. Scroll down to the **Artifacts** section and download the file for your architecture.
-
-**For Flatpak:**
-
-You can quickly add the automated repository to receive updates by running:
-
-```bash
-flatpak remote-add --user --if-not-exists mixtapes https://m-obeid.github.io/Mixtapes/mixtapes.flatpakrepo
-flatpak install --user mixtapes com.pocoguy.Muse
-```
-
-> [!NOTE]
-> Recently, the repository name was changed from "Muse" to "Mixtapes".
-> If you are updating from an older version, you might need to remove the old repository first:
-> `flatpak remote-delete --user mixtapes`
-
-_(Alternatively, you can download the offline bundle file:)_
-
-```bash
-unzip Mixtapes-x86_64-flatpak.zip
-flatpak install --user ./Mixtapes-x86_64.flatpak
-```
-
-### Flatpak
-
-1. Install Flatpak and required runtimes:
-
-   ```bash
-   flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49 org.freedesktop.Sdk.Extension.node24//24.08
-   ```
-
-2. Clone the repository:
-
-   ```bash
-   git clone https://github.com/m-obeid/Mixtapes.git
-   cd Mixtapes
-   ```
-
-3. Build and install:
-
-   ```bash
-   flatpak-builder --user --install --force-clean build-dir com.pocoguy.Muse.yaml
-   ```
-
-4. Run:
-   ```bash
-   flatpak run com.pocoguy.Muse
-   ```
-
-## Authentication
-
-> [!NOTE]
-> You can now authenticate using the app itself through an embedded WebKit browser!
-> Below are the old, manual instructions.
-
-This app uses `ytmusicapi` for backend data. Authentication allows access to your library and higher quality streams.
-
-To authenticate, you need to generate a `browser.json` file.
-
-- Run: `ytmusicapi browser`
-- Follow instructions to log in via your browser and paste the headers. It is recommended to use a private browser profile for this, so that you don't get logged out of the account from the app.
-- The output will be saved as `browser.json` in the project root directory.
-
-**Flatpak:** Open your browser, go to YouTube Music, and copy request headers as described [here](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html).
-Then run `flatpak run --command=sh com.pocoguy.Muse` and inside the shell run `mkdir -p ~/data/Muse && cd ~/data/Muse && ytmusicapi browser`.
-Paste the headers and press Ctrl-D.
-
-If you don't have a `browser.json` file, the app will use the unauthenticated API, which can cause playback issues.
-
-The OAuth flow is currently borked in `ytmusicapi`, don't use it. I removed it from the app, but there might be some leftover code.
 
 ## License
 
-GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE) for details.
+This project is licensed under the [GNU General Public License v3.0](LICENSE) or later.
