@@ -115,8 +115,15 @@ jobs:
           cp $MSYS_ROOT/share/glib-2.0/schemas/gschemas.compiled dist/mixtapes/runtime/share/glib-2.0/schemas/ || true
           cp -r $MSYS_ROOT/share/icons dist/mixtapes/runtime/share/ || true
 
+          echo "Copying GIO TLS modules and CA certificates..."
+          mkdir -p dist/mixtapes/runtime/lib/gio/modules
+          cp $MSYS_ROOT/lib/gio/modules/*.dll dist/mixtapes/runtime/lib/gio/modules/ || true
+          mkdir -p dist/mixtapes/runtime/ssl/certs
+          cp $MSYS_ROOT/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ || true
+          cp $MSYS_ROOT/etc/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ 2>/dev/null || true
+
           # Create launcher bat
-          printf '@echo off\r\nset MYDIR=%%~dp0\r\nset PATH=%%MYDIR%%runtime\\bin;%%PATH%%\r\nset PYTHONHOME=%%MYDIR%%runtime\r\nset GI_TYPELIB_PATH=%%MYDIR%%runtime\\lib\\girepository-1.0\r\nset GST_PLUGIN_PATH=%%MYDIR%%runtime\\lib\\gstreamer-1.0\r\nset GSETTINGS_SCHEMA_DIR=%%MYDIR%%runtime\\share\\glib-2.0\\schemas\r\nset XDG_DATA_DIRS=%%MYDIR%%runtime\\share\r\nset PYTHONPATH=%%MYDIR%%src\r\n"%%MYDIR%%runtime\\bin\\python3.exe" "%%MYDIR%%src\\main.py" %%*\r\n' > dist/mixtapes/mixtapes.bat
+          printf '@echo off\r\nset MYDIR=%%~dp0\r\nset PATH=%%MYDIR%%runtime\\bin;%%PATH%%\r\nset PYTHONHOME=%%MYDIR%%runtime\r\nset GI_TYPELIB_PATH=%%MYDIR%%runtime\\lib\\girepository-1.0\r\nset GST_PLUGIN_PATH=%%MYDIR%%runtime\\lib\\gstreamer-1.0\r\nset GIO_MODULE_DIR=%%MYDIR%%runtime\\lib\\gio\\modules\r\nset GSETTINGS_SCHEMA_DIR=%%MYDIR%%runtime\\share\\glib-2.0\\schemas\r\nset SSL_CERT_FILE=%%MYDIR%%runtime\\ssl\\certs\\ca-bundle.crt\r\nset XDG_DATA_DIRS=%%MYDIR%%runtime\\share\r\nset PYTHONPATH=%%MYDIR%%src\r\n"%%MYDIR%%runtime\\bin\\python3.exe" "%%MYDIR%%src\\main.py" %%*\r\n' > dist/mixtapes/mixtapes.bat
 
           echo "Bundle size:"
           du -sh dist/mixtapes
