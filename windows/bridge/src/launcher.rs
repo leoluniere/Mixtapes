@@ -8,7 +8,8 @@ use std::process::Command;
 
 fn main() {
     let exe_path = env::current_exe().unwrap_or_default();
-    let base_dir = exe_path.parent().unwrap_or(&PathBuf::from("."));
+    let fallback = PathBuf::from(".");
+    let base_dir = exe_path.parent().unwrap_or(&fallback);
     let base = base_dir.to_string_lossy();
 
     // Build PATH

@@ -15,8 +15,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use windows::Foundation::Uri;
 use windows::Media::Playback::MediaPlayer;
 use windows::Media::{
@@ -88,18 +86,16 @@ fn setup_smtc() -> windows::core::Result<(MediaPlayer, SystemMediaTransportContr
             SystemMediaTransportControls,
             SystemMediaTransportControlsButtonPressedEventArgs,
         >::new(|_, args| {
-            if let Some(args) = args {
-                let button = args.Button()?;
-                let name = match button {
-                    SystemMediaTransportControlsButton::Play => "play",
-                    SystemMediaTransportControlsButton::Pause => "pause",
-                    SystemMediaTransportControlsButton::Next => "next",
-                    SystemMediaTransportControlsButton::Previous => "previous",
-                    SystemMediaTransportControlsButton::Stop => "stop",
-                    _ => return Ok(()),
-                };
-                send_event(name);
-            }
+            let button = args.as_ref().unwrap().Button()?;
+            let name = match button {
+                SystemMediaTransportControlsButton::Play => "play",
+                SystemMediaTransportControlsButton::Pause => "pause",
+                SystemMediaTransportControlsButton::Next => "next",
+                SystemMediaTransportControlsButton::Previous => "previous",
+                SystemMediaTransportControlsButton::Stop => "stop",
+                _ => return Ok(()),
+            };
+            send_event(name);
             Ok(())
         }),
     )?;

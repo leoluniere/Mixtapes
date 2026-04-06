@@ -1,7 +1,7 @@
 fn main() {
     // Embed icon into the launcher exe
     if std::path::Path::new("launcher.rc").exists() {
-        embed_resource::compile("launcher.rc", embed_resource::NONE);
+        let _ = embed_resource::compile("launcher.rc", embed_resource::NONE);
     }
 
     // Make the launcher a Windows GUI app (no console window)
