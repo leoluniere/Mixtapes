@@ -26,6 +26,23 @@ jobs:
           Write-Host "Login helper built:"
           Get-ChildItem dist/MixtapesLogin.exe
 
+      - name: Build Rust binaries (native Windows toolchain)
+        shell: pwsh
+        run: |
+          cd windows/bridge
+          cargo build --release
+          Write-Host "Rust binaries built:"
+          Get-ChildItem target/release/*.exe
+
+      - name: Download Adwaita Sans font
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/fonts
+          Invoke-WebRequest -Uri "https://gitlab.gnome.org/api/v4/projects/GNOME%2Fadwaita-fonts/repository/files/sans%2FAdwaitaSans-Regular.ttf/raw?ref=main" -OutFile "windows/fonts/AdwaitaSans-Regular.ttf"
+          $size = (Get-Item "windows/fonts/AdwaitaSans-Regular.ttf").Length
+          Write-Host "Font size: $size bytes"
+          if ($size -lt 10000) { throw "Font file too small" }
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -45,7 +62,6 @@ jobs:
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-nodejs
             mingw-w64-ucrt-x86_64-ffmpeg
-            mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-imagemagick
             mingw-w64-ucrt-x86_64-python-pillow
             git
@@ -54,29 +70,13 @@ jobs:
         run: |
           pip install --no-build-isolation --break-system-packages -r requirements-windows.txt
           pip install --no-build-isolation --break-system-packages pystray
-          # winrt wheels are only published for native Windows Python (win_amd64),
-          # not MSYS2/MinGW. Force the platform to download the correct wheels.
-          PYVER=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
-          pip download --break-system-packages --only-binary=:all: --platform win_amd64 --python-version $PYVER --implementation cp -d /tmp/winrt-wheels winrt-Windows.Media winrt-Windows.Media.Playback winrt-Windows.Storage.Streams winrt-Windows.Foundation winrt-runtime
-          pip install --break-system-packages --no-deps /tmp/winrt-wheels/*.whl
 
-      - name: Download Adwaita Sans font
-        shell: pwsh
+      - name: Generate app icon
         run: |
-          New-Item -ItemType Directory -Force -Path windows/fonts
-          Invoke-WebRequest -Uri "https://gitlab.gnome.org/api/v4/projects/GNOME%2Fadwaita-fonts/repository/files/sans%2FAdwaitaSans-Regular.ttf/raw?ref=main" -OutFile "windows/fonts/AdwaitaSans-Regular.ttf"
-          $size = (Get-Item "windows/fonts/AdwaitaSans-Regular.ttf").Length
-          Write-Host "Font size: $size bytes"
-          if ($size -lt 10000) { throw "Font file too small" }
-
-      - name: Generate icon and compile launcher
-        run: |
-          # Convert SVG app icon to ICO (multi-size)
           SVG_ICON="build-dir/files/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg"
           if [ ! -f "$SVG_ICON" ]; then
             SVG_ICON="assets/icons/hicolor/scalable/actions/compass2-symbolic.svg"
           fi
-
           magick "$SVG_ICON" -background none -resize 256x256 windows/mixtapes_256.png
           magick windows/mixtapes_256.png \
             \( -clone 0 -resize 16x16 \) \
@@ -86,13 +86,6 @@ jobs:
             \( -clone 0 -resize 128x128 \) \
             \( -clone 0 -resize 256x256 \) \
             -delete 0 windows/mixtapes.ico
-
-          # Compile the native .exe launcher
-          cd windows
-          windres launcher.rc -o launcher_res.o
-          gcc -mwindows -O2 -o Mixtapes.exe launcher.c launcher_res.o
-          echo "Launcher compiled:"
-          ls -la Mixtapes.exe
 
       - name: Compile GResources
         run: |
@@ -122,24 +115,23 @@ jobs:
           # Copy app source and compile to .pyc (keep .py so launcher references work)
           cp -r src dist/mixtapes/
           python -m compileall -b -q dist/mixtapes/src/
-          # Remove __pycache__ dirs (compileall -b puts .pyc next to .py)
           find dist/mixtapes/src -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
           # Copy assets
           cp -r assets dist/mixtapes/
 
-          # Copy .exe launcher, login helper, and icon
-          cp windows/Mixtapes.exe dist/mixtapes/
+          # Copy Rust-built binaries
+          cp windows/bridge/target/release/Mixtapes.exe dist/mixtapes/
+          cp windows/bridge/target/release/MixtapesBridge.exe dist/mixtapes/
+
+          # Copy login helper and icon
           mkdir -p dist/mixtapes/windows
           cp windows/mixtapes.ico dist/mixtapes/windows/
-          # Login helper was built by native Python outside MSYS2
           cp dist/MixtapesLogin.exe dist/mixtapes/ 2>/dev/null || true
 
-          # Bundle Adwaita Sans font (auto-installed per-user on first run)
+          # Bundle Adwaita Sans font
           mkdir -p dist/mixtapes/fonts
           cp windows/fonts/*.ttf dist/mixtapes/fonts/
-
-
 
           # Copy runtime binaries
           echo "Copying runtime binaries..."
@@ -170,8 +162,7 @@ jobs:
           cp $MSYS_ROOT/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ || true
           cp $MSYS_ROOT/etc/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ 2>/dev/null || true
 
-
-          # Keep the .bat as a debug launcher
+          # Debug launcher (bat)
           printf '@echo off\r\nset MYDIR=%%~dp0\r\nset PATH=%%MYDIR%%runtime\\bin;%%PATH%%\r\nset PYTHONHOME=%%MYDIR%%runtime\r\nset GI_TYPELIB_PATH=%%MYDIR%%runtime\\lib\\girepository-1.0\r\nset GST_PLUGIN_PATH=%%MYDIR%%runtime\\lib\\gstreamer-1.0\r\nset GIO_MODULE_DIR=%%MYDIR%%runtime\\lib\\gio\\modules\r\nset GSETTINGS_SCHEMA_DIR=%%MYDIR%%runtime\\share\\glib-2.0\\schemas\r\nset SSL_CERT_FILE=%%MYDIR%%runtime\\ssl\\certs\\ca-bundle.crt\r\nset XDG_DATA_DIRS=%%MYDIR%%runtime\\share\r\nset PYTHONPATH=%%MYDIR%%src\r\n"%%MYDIR%%runtime\\bin\\python3.exe" "%%MYDIR%%src\\main.py" %%*\r\n' > dist/mixtapes/mixtapes-debug.bat
 
           echo "Bundle size:"
