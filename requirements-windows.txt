@@ -7,5 +7,3 @@ urllib3
 mutagen
 StrEnum==0.4.15
 pywebview
-pystray
-Pillow

@@ -39,11 +39,13 @@ jobs:
             mingw-w64-ucrt-x86_64-ffmpeg
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-imagemagick
+            mingw-w64-ucrt-x86_64-python-pillow
             git
 
       - name: Install Python dependencies
         run: |
-          pip install --no-build-isolation -r requirements-windows.txt
+          pip install --no-build-isolation --break-system-packages -r requirements-windows.txt
+          pip install --no-build-isolation --break-system-packages pystray
 
       - name: Download Adwaita Sans font
         run: |
