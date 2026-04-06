@@ -54,8 +54,7 @@ jobs:
         run: |
           pip install --no-build-isolation --break-system-packages -r requirements-windows.txt
           pip install --no-build-isolation --break-system-packages pystray
-          pip install --break-system-packages winrt-sdk
-          pip install --break-system-packages winrt-Windows.Media winrt-Windows.Media.Playback winrt-Windows.Storage.Streams winrt-Windows.Foundation
+          pip install --break-system-packages --only-binary=:all: winrt-Windows.Media winrt-Windows.Media.Playback winrt-Windows.Storage.Streams winrt-Windows.Foundation
 
       - name: Download Adwaita Sans font
         shell: pwsh
