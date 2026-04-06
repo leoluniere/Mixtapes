@@ -82,8 +82,26 @@ def check_cookies(window):
     print("Timed out waiting for auth cookies (120s).")
 
 
+def _compute_sapisidhash(sapisid, origin="https://music.youtube.com"):
+    """Compute SAPISIDHASH from SAPISID cookie, matching what YouTube expects."""
+    import hashlib
+    timestamp = str(int(time.time()))
+    hash_input = f"{timestamp} {sapisid} {origin}"
+    sha1 = hashlib.sha1(hash_input.encode()).hexdigest()
+    return f"SAPISIDHASH {timestamp}_{sha1}"
+
+
+def _extract_sapisid(cookie_string):
+    """Extract SAPISID value from a cookie string."""
+    for part in cookie_string.split(";"):
+        part = part.strip()
+        if part.startswith("SAPISID="):
+            val = part[len("SAPISID="):]
+            return val.strip('"')
+    return None
+
+
 def _save_and_close(window, cookie_string):
-    # Get user agent, with fallback
     ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     try:
         result = window.evaluate_js("navigator.userAgent")
@@ -92,9 +110,21 @@ def _save_and_close(window, cookie_string):
     except Exception:
         pass
 
+    # Build full headers matching what ytmusicapi expects for browser auth
+    sapisid = _extract_sapisid(cookie_string)
+    auth = _compute_sapisidhash(sapisid) if sapisid else ""
+
     headers = {
-        "Cookie": cookie_string,
         "User-Agent": ua,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Content-Type": "application/json; charset=UTF-8",
+        "Authorization": auth,
+        "X-Goog-AuthUser": "0",
+        "X-Origin": "https://music.youtube.com",
+        "Origin": "https://music.youtube.com",
+        "Referer": "https://music.youtube.com/",
+        "Cookie": cookie_string,
     }
 
     output = OUTPUT_PATH or get_default_output()
