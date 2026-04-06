@@ -57,16 +57,6 @@ jobs:
           pip install --break-system-packages winrt-sdk
           pip install --break-system-packages winrt-Windows.Media winrt-Windows.Media.Playback winrt-Windows.Storage.Streams winrt-Windows.Foundation
 
-      - name: Download Adwaita Sans font
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path windows/fonts
-          Invoke-WebRequest -Uri "https://gitlab.gnome.org/api/v4/projects/GNOME%2Fadwaita-fonts/repository/files/sans%2FAdwaitaSans-Regular.ttf/raw?ref=main" -OutFile "windows/fonts/AdwaitaSans-Regular.ttf"
-          Get-ChildItem windows/fonts/
-          $size = (Get-Item "windows/fonts/AdwaitaSans-Regular.ttf").Length
-          Write-Host "Font size: $size bytes (variable font, includes all weights)"
-          if ($size -lt 10000) { throw "Font file too small - likely not a real font" }
-
       - name: Generate icon and compile launcher
         run: |
           # Convert SVG app icon to ICO (multi-size)
@@ -133,9 +123,7 @@ jobs:
           # Login helper was built by native Python outside MSYS2
           cp dist/MixtapesLogin.exe dist/mixtapes/ 2>/dev/null || true
 
-          # Copy fonts
-          mkdir -p dist/mixtapes/share/fonts
-          cp windows/fonts/*.ttf dist/mixtapes/share/fonts/
+
 
           # Copy runtime binaries
           echo "Copying runtime binaries..."
@@ -166,9 +154,6 @@ jobs:
           cp $MSYS_ROOT/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ || true
           cp $MSYS_ROOT/etc/ssl/certs/ca-bundle.crt dist/mixtapes/runtime/ssl/certs/ 2>/dev/null || true
 
-          # Install fonts into runtime share for fontconfig discovery
-          mkdir -p dist/mixtapes/runtime/share/fonts/adwaita-sans
-          cp windows/fonts/*.ttf dist/mixtapes/runtime/share/fonts/adwaita-sans/
 
           # Keep the .bat as a debug launcher
           printf '@echo off\r\nset MYDIR=%%~dp0\r\nset PATH=%%MYDIR%%runtime\\bin;%%PATH%%\r\nset PYTHONHOME=%%MYDIR%%runtime\r\nset GI_TYPELIB_PATH=%%MYDIR%%runtime\\lib\\girepository-1.0\r\nset GST_PLUGIN_PATH=%%MYDIR%%runtime\\lib\\gstreamer-1.0\r\nset GIO_MODULE_DIR=%%MYDIR%%runtime\\lib\\gio\\modules\r\nset GSETTINGS_SCHEMA_DIR=%%MYDIR%%runtime\\share\\glib-2.0\\schemas\r\nset SSL_CERT_FILE=%%MYDIR%%runtime\\ssl\\certs\\ca-bundle.crt\r\nset XDG_DATA_DIRS=%%MYDIR%%runtime\\share\r\nset PYTHONPATH=%%MYDIR%%src\r\n"%%MYDIR%%runtime\\bin\\python3.exe" "%%MYDIR%%src\\main.py" %%*\r\n' > dist/mixtapes/mixtapes-debug.bat

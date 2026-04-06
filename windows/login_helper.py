@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-import threading
 import webview
 
 
@@ -28,68 +27,82 @@ def get_default_output():
     return os.path.join(d, "login_headers.json")
 
 
-class LoginCapture:
-    def __init__(self, window):
-        self.window = window
-        self.finished = False
-        self._poll_thread = None
+def check_cookies(window):
+    """Runs in pywebview's background thread. Polls for auth cookies."""
+    for attempt in range(120):
+        time.sleep(1)
+        try:
+            url = window.get_current_url() or ""
+        except Exception:
+            continue
 
-    def on_loaded(self):
-        """Start polling cookies once we land on music.youtube.com."""
-        if self.finished:
-            return
+        if "music.youtube.com" not in url or "accounts.google.com" in url:
+            continue
 
-        url = self.window.get_current_url() or ""
+        print(f"[attempt {attempt}] On YouTube Music: {url}")
 
-        if "music.youtube.com" in url and "accounts.google.com" not in url:
-            # Start a polling thread to check cookies via get_cookies()
-            if not self._poll_thread:
-                self._poll_thread = threading.Thread(target=self._poll_cookies, daemon=True)
-                self._poll_thread.start()
+        # Strategy 1: pywebview get_cookies() — gets all cookies including HttpOnly
+        try:
+            cookies = window.get_cookies()
+            print(f"  get_cookies() returned {len(cookies)} cookies")
 
-    def _poll_cookies(self):
-        """Poll for auth cookies using pywebview's get_cookies() which sees HttpOnly cookies."""
-        for _ in range(30):  # Try for 30 seconds
-            if self.finished:
-                return
+            cookie_strs = []
+            has_sapisid = False
 
-            try:
-                cookies = self.window.get_cookies()
-                cookie_strs = []
-                has_sapisid = False
-
-                for cookie in cookies:
-                    name = cookie.get("name", "") if isinstance(cookie, dict) else getattr(cookie, "name", "")
-                    value = cookie.get("value", "") if isinstance(cookie, dict) else getattr(cookie, "value", "")
-
+            for cookie in cookies:
+                # pywebview returns http.cookies.SimpleCookie objects
+                # each SimpleCookie is a dict of {name: Morsel}
+                for name, morsel in cookie.items():
+                    value = morsel.coded_value
                     if name and value:
                         cookie_strs.append(f"{name}={value}")
                         if name in ("SAPISID", "__Secure-3PAPISID"):
                             has_sapisid = True
+                            print(f"  Found auth cookie: {name}")
 
-                if has_sapisid and cookie_strs:
-                    self.finished = True
-                    ua = self.window.evaluate_js("navigator.userAgent") or ""
+            if has_sapisid:
+                _save_and_close(window, "; ".join(cookie_strs))
+                return
 
-                    headers = {
-                        "Cookie": "; ".join(cookie_strs),
-                        "User-Agent": ua,
-                    }
+        except Exception as e:
+            print(f"  get_cookies() error: {e}")
 
-                    output = OUTPUT_PATH or get_default_output()
-                    with open(output, "w") as f:
-                        json.dump(headers, f)
-
-                    print(f"Login successful! Headers saved to: {output}")
-                    self.window.destroy()
+        # Strategy 2: document.cookie — gets non-HttpOnly cookies (SAPISID is accessible)
+        try:
+            js_cookies = window.evaluate_js("document.cookie")
+            if js_cookies:
+                print(f"  document.cookie length: {len(js_cookies)}")
+                if "SAPISID" in js_cookies:
+                    print("  Found SAPISID via document.cookie!")
+                    _save_and_close(window, js_cookies)
                     return
+        except Exception as e:
+            print(f"  evaluate_js error: {e}")
 
-            except Exception as e:
-                print(f"Cookie poll error: {e}")
+    print("Timed out waiting for auth cookies (120s).")
 
-            time.sleep(1)
 
-        print("Timed out waiting for auth cookies.")
+def _save_and_close(window, cookie_string):
+    # Get user agent, with fallback
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    try:
+        result = window.evaluate_js("navigator.userAgent")
+        if result:
+            ua = result
+    except Exception:
+        pass
+
+    headers = {
+        "Cookie": cookie_string,
+        "User-Agent": ua,
+    }
+
+    output = OUTPUT_PATH or get_default_output()
+    with open(output, "w") as f:
+        json.dump(headers, f)
+
+    print(f"Login successful! Headers saved to: {output}")
+    window.destroy()
 
 
 def main():
@@ -109,9 +122,7 @@ def main():
         height=600,
     )
 
-    capture = LoginCapture(window)
-    window.events.loaded += capture.on_loaded
-    webview.start(private_mode=False)
+    webview.start(func=check_cookies, args=(window,), private_mode=True)
 
     output = OUTPUT_PATH or get_default_output()
     if not os.path.exists(output):
