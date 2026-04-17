@@ -780,9 +780,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def show_about(self, action, param):
         about = Adw.AboutDialog()
+        about.set_application_icon("com.pocoguy.Muse")
         about.set_application_name("Mixtapes")
         about.set_developer_name("POCOGuy")
-        about.set_version("2026-11-04.0")
+        about.set_version("2026-18-04.0")
         about.set_website("https://www.pocoguy.com/#!/mixtapes")
         about.set_copyright("© 2026 POCOGuy")
         about.set_license_type(Gtk.License.GPL_3_0)

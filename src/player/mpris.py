@@ -39,6 +39,9 @@ class MuseMprisAdapter(MprisAdapter):
                 win.present()
         return False
 
+    def get_desktop_entry(self):
+        return "com.pocoguy.Muse"
+
     def can_fullscreen(self) -> bool:
         return False
 

@@ -325,6 +325,27 @@ class Player(GObject.Object):
             self.current_queue_index = 0
             self._play_current_index()
 
+        self.emit("state-changed", "queue-updated")
+
+    def add_tracks_to_queue(self, tracks, next=False):
+        """Adds multiple tracks to the queue. If next=True, inserts after current."""
+        if not tracks:
+            return
+        if next and self.current_queue_index >= 0:
+            pos = self.current_queue_index + 1
+            for i, t in enumerate(tracks):
+                self.queue.insert(pos + i, t)
+                self.original_queue.insert(pos + i, t)
+        else:
+            self.queue.extend(tracks)
+            self.original_queue.extend(tracks)
+
+        if self.current_queue_index == -1:
+            self.current_queue_index = 0
+            self._play_current_index()
+
+        self.emit("state-changed", "queue-updated")
+
     def remove_from_queue(self, index):
         if 0 <= index < len(self.queue):
             pop = self.queue.pop(index)

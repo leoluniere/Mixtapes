@@ -351,7 +351,31 @@ class SongRowWidget(Gtk.Box):
         action_radio.connect("activate", start_radio_action)
         group.add_action(action_radio)
 
+        # Play Next / Add to Queue
+        def play_next_action(action, param):
+            self.player.add_to_queue(dict(item.track_data), next=True)
+            self._show_toast("Playing next")
+
+        def add_to_queue_action(action, param):
+            self.player.add_to_queue(dict(item.track_data), next=False)
+            self._show_toast("Added to queue")
+
+        a_play_next = Gio.SimpleAction.new("play_next", None)
+        a_play_next.connect("activate", play_next_action)
+        group.add_action(a_play_next)
+
+        a_add_queue = Gio.SimpleAction.new("add_to_queue", None)
+        a_add_queue.connect("activate", add_to_queue_action)
+        group.add_action(a_add_queue)
+
         menu_model = Gio.Menu()
+
+        # Queue section
+        if item.video_id:
+            queue_section = Gio.Menu()
+            queue_section.append("Play Next", "row.play_next")
+            queue_section.append("Add to Queue", "row.add_to_queue")
+            menu_model.append_section(None, queue_section)
 
         # Navigation section
         nav_section = Gio.Menu()

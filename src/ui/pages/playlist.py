@@ -215,6 +215,14 @@ class PlaylistPage(Adw.Bin):
         action_start_radio.connect("activate", self._on_start_radio)
         self.action_group.add_action(action_start_radio)
 
+        a_play_next = Gio.SimpleAction.new("play_all_next", None)
+        a_play_next.connect("activate", self._on_play_all_next)
+        self.action_group.add_action(a_play_next)
+
+        a_add_queue = Gio.SimpleAction.new("add_all_to_queue", None)
+        a_add_queue.connect("activate", self._on_add_all_to_queue)
+        self.action_group.add_action(a_add_queue)
+
         self._is_saved_to_library = False
 
         # We need to track visibility of edit/delete in the menu
@@ -928,6 +936,12 @@ class PlaylistPage(Adw.Bin):
 
         self.more_menu_model.remove_all()
 
+        # Queue actions
+        queue_section = Gio.Menu()
+        queue_section.append("Play Next", "page.play_all_next")
+        queue_section.append("Add to Queue", "page.add_all_to_queue")
+        self.more_menu_model.append_section(None, queue_section)
+
         # 1. Add All to Playlist Submenu
         self.playlist_menu.remove_all()
         playlists = self.client.get_editable_playlists()
@@ -970,6 +984,26 @@ class PlaylistPage(Adw.Bin):
         radio_id = pid if pid.startswith("RDAMPL") else f"RDAMPL{pid}"
         self.player.start_radio(playlist_id=radio_id)
         self._show_toast("Starting radio...")
+
+    def _get_all_tracks(self):
+        tracks = (
+            self.original_tracks
+            if hasattr(self, "original_tracks") and self.original_tracks
+            else self.current_tracks
+        )
+        return [dict(t) for t in tracks if t.get("videoId")]
+
+    def _on_play_all_next(self, action, param):
+        tracks = self._get_all_tracks()
+        if tracks:
+            self.player.add_tracks_to_queue(tracks, next=True)
+            self._show_toast(f"Playing {len(tracks)} tracks next")
+
+    def _on_add_all_to_queue(self, action, param):
+        tracks = self._get_all_tracks()
+        if tracks:
+            self.player.add_tracks_to_queue(tracks, next=False)
+            self._show_toast(f"Added {len(tracks)} tracks to queue")
 
     def _on_download_all(self, action, param):
         all_tracks = (
@@ -2236,8 +2270,62 @@ class PlaylistPage(Adw.Bin):
         if nav_section.get_n_items() > 0:
             menu_model.append_section(None, nav_section)
 
-        # ── Section: Actions ──
+        # ── Section: Queue ──
+        queue_section = Gio.Menu()
         has_selection = self._multi_select_mode and self._selected_video_ids
+
+        if has_selection:
+            sel_tracks = self._get_selected_tracks()
+            n = len(sel_tracks)
+
+            a_pn = Gio.SimpleAction.new("play_next", None)
+            a_pn.connect(
+                "activate",
+                lambda act, p, ts=list(sel_tracks): (
+                    self.player.add_tracks_to_queue([dict(t) for t in ts], next=True),
+                    self._show_toast(f"Playing {len(ts)} tracks next"),
+                ),
+            )
+            group.add_action(a_pn)
+            queue_section.append(f"Play {n} Next", "ctx.play_next")
+
+            a_aq = Gio.SimpleAction.new("add_to_queue", None)
+            a_aq.connect(
+                "activate",
+                lambda act, p, ts=list(sel_tracks): (
+                    self.player.add_tracks_to_queue([dict(t) for t in ts], next=False),
+                    self._show_toast(f"Added {len(ts)} tracks to queue"),
+                ),
+            )
+            group.add_action(a_aq)
+            queue_section.append(f"Add {n} to Queue", "ctx.add_to_queue")
+        elif full_track_data:
+            a_pn = Gio.SimpleAction.new("play_next", None)
+            a_pn.connect(
+                "activate",
+                lambda act, p, t=full_track_data: (
+                    self.player.add_to_queue(dict(t), next=True),
+                    self._show_toast("Playing next"),
+                ),
+            )
+            group.add_action(a_pn)
+            queue_section.append("Play Next", "ctx.play_next")
+
+            a_aq = Gio.SimpleAction.new("add_to_queue", None)
+            a_aq.connect(
+                "activate",
+                lambda act, p, t=full_track_data: (
+                    self.player.add_to_queue(dict(t), next=False),
+                    self._show_toast("Added to queue"),
+                ),
+            )
+            group.add_action(a_aq)
+            queue_section.append("Add to Queue", "ctx.add_to_queue")
+
+        if queue_section.get_n_items() > 0:
+            menu_model.append_section(None, queue_section)
+
+        # ── Section: Actions ──
         action_section = Gio.Menu()
 
         # Start Radio (single song only, not for multi-select, online only)

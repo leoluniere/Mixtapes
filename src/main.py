@@ -62,6 +62,19 @@ class MusicApp(Adw.Application):
         except Exception as e:
             print(f"Failed to load GResource: {e}")
 
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+
+        # Prepend project icons to theme search path (for running from source)
+        # Must be first so it takes priority over system-installed Flatpak icons
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        assets_icons = os.path.join(project_root, "assets", "icons")
+        if os.path.isdir(assets_icons):
+            theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            theme.set_search_path([assets_icons] + theme.get_search_path())
+
+        Gtk.Window.set_default_icon_name("com.pocoguy.Muse")
+
     def do_activate(self):
         # Load CSS
         css_provider = Gtk.CssProvider()

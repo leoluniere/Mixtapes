@@ -79,6 +79,24 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="2026-18-04.0" date="2026-04-18">
+      <description>
+        <p>New app icon, Discord RPC improvements, queue management, and bug fixes.</p>
+        <ul>
+          <li>New app icon with proper symbolic and devel variants</li>
+          <li>Windows ICO now has transparency and all standard resolutions (16-256px)</li>
+          <li>Discord RPC: fix status display field name (status_display_type) so artist/song shows under username</li>
+          <li>Discord RPC: configurable status display type (app name, artist, or song title) in preferences</li>
+          <li>Discord RPC: enable/disable toggle in preferences with connection status indicator</li>
+          <li>Discord RPC: album name now shown in rich presence instead of repeating song title</li>
+          <li>Play Next and Add to Queue options in song context menus, playlist row context menus, and playlist/album header menus</li>
+          <li>Album name displayed in search results alongside artist</li>
+          <li>Missing album names fetched in background for search results</li>
+          <li>Refresh Metadata option in song row and expanded player menus</li>
+          <li>Maybe fixed: playlist background fetch race condition that could cause segfaults</li>
+        </ul>
+      </description>
+    </release>
     <release version="2026-11-04.0" date="2026-11-04">
       <description>
         <p>Discord Rich Presence support and a stack of stability fixes around fast skipping, the queue, and the explore page.</p>
