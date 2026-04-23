@@ -68,9 +68,13 @@ modules:
         EOF
       - chmod +x ${FLATPAK_DEST}/bin/muse
     sources:
-      - type: git
-        url: https://github.com/m-obeid/Mixtapes.git
-        branch: main
+      # Build from the checked-out working tree rather than re-cloning
+      # over HTTPS. Avoids a second download per CI run, dodges
+      # transient GitHub 500s on the Git frontend, and — importantly —
+      # builds the actual SHA that CI was invoked on (PR branches,
+      # workflow_dispatch, etc.) instead of always pulling `main`.
+      - type: dir
+        path: .
       - type: file
         path: com.pocoguy.Muse.desktop
       - type: file
